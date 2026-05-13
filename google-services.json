@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "287433829882-ho1f6n6iijqifh6te0k9lr41do78b88e.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.paulfulfer.paultools",
+            "certificate_hash": "e9f18f0af8ba98683d19ba172e22f4d17ddca38d"
+          }
+        },
+        {
           "client_id": "287433829882-at0bb6kqq7b67o4vfq42hee48r5ff943.apps.googleusercontent.com",
           "client_type": 3
         }
