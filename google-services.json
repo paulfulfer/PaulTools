@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "287433829882",
+    "project_id": "personal-website-b1c9a",
+    "storage_bucket": "personal-website-b1c9a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:287433829882:android:1630fdd8c55ea9d40a4843",
+        "android_client_info": {
+          "package_name": "com.paulfulfer.paultools"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "287433829882-at0bb6kqq7b67o4vfq42hee48r5ff943.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDJqnHmcf_CsJDEAA85QK9aJYyJbtOXz0w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "287433829882-at0bb6kqq7b67o4vfq42hee48r5ff943.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

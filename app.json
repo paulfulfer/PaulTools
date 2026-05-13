@@ -12,6 +12,7 @@
     },
     "android": {
       "package": "com.paulfulfer.paultools",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#0d1117"
       }
