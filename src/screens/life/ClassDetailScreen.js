@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TextInput, TouchableOpacity,
-  StyleSheet, Alert, Platform, Modal, KeyboardAvoidingView,
-  Switch, ActivityIndicator,
+  StyleSheet, Alert, Platform, Modal, Switch, ActivityIndicator,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
@@ -15,27 +14,33 @@ import { useAuth } from '../../context/AuthContext';
 
 const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
 
-const COLORS      = ['#2a7de1','#0e9e70','#c27d08','#d03030','#6c5bbf','#e06030','#1899a8','#888888'];
+const COLORS       = ['#2a7de1','#0e9e70','#c27d08','#d03030','#6c5bbf','#e06030','#1899a8','#888888'];
 const ASSIGN_TYPES = ['Homework','Quiz','Exam','Project','Reading','Lab','Discussion','Other'];
 
 function fmtDateKey(d) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
-
 function fmtDateDisp(dateStr) {
   if (!dateStr) return 'No due date';
   return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
 }
-
 function getDueColor(dateStr, c) {
   if (!dateStr) return c.textMuted;
   const today = new Date(); today.setHours(0,0,0,0);
-  const due   = new Date(dateStr + 'T00:00:00');
-  const diff  = Math.round((due - today) / 86400000);
+  const diff  = Math.round((new Date(dateStr + 'T00:00:00') - today) / 86400000);
   if (diff < 0)  return c.red;
-  if (diff <= 1) return c.amber;
   if (diff <= 7) return c.amber;
   return c.textMuted;
+}
+
+// ─── Shared label ─────────────────────────────────────────────────────────────
+
+function FLabel({ label, c }) {
+  return (
+    <Text style={{ fontSize:9, fontWeight:'600', letterSpacing:0.8, marginBottom:3, marginTop:10, color:c.textMuted, fontFamily:MONO }}>
+      {label.toUpperCase()}
+    </Text>
+  );
 }
 
 // ─── Assignment row ───────────────────────────────────────────────────────────
@@ -45,13 +50,11 @@ function AssignmentRow({ assignment, courseColor, onToggleDone, onEdit, onDelete
   return (
     <TouchableOpacity onPress={onEdit} activeOpacity={0.75}
       style={[ar.row, { backgroundColor: assignment.done ? c.bgBase : c.bgCard, borderColor:c.borderSubtle, opacity: assignment.done ? 0.6 : 1 }]}>
-      {/* Done toggle */}
       <TouchableOpacity onPress={onToggleDone} hitSlop={{ top:8, bottom:8, left:8, right:8 }}>
         <View style={[ar.check, { borderColor: assignment.done ? courseColor : c.borderSubtle, backgroundColor: assignment.done ? courseColor : 'transparent' }]}>
           {assignment.done && <Text style={{ color:'#fff', fontSize:10, fontWeight:'700' }}>✓</Text>}
         </View>
       </TouchableOpacity>
-      {/* Info */}
       <View style={{ flex:1, minWidth:0 }}>
         <Text style={[ar.name, { color:c.textPrimary, fontFamily:MONO, textDecorationLine: assignment.done ? 'line-through' : 'none' }]} numberOfLines={1}>
           {assignment.name}
@@ -67,7 +70,6 @@ function AssignmentRow({ assignment, courseColor, onToggleDone, onEdit, onDelete
         </View>
         {!!assignment.notes && <Text style={[ar.notes, { color:c.textMuted, fontFamily:MONO }]} numberOfLines={1}>{assignment.notes}</Text>}
       </View>
-      {/* Delete */}
       <TouchableOpacity onPress={onDelete} hitSlop={{ top:8, bottom:8, left:8, right:8 }}>
         <Text style={{ color:c.textMuted, fontSize:14 }}>✕</Text>
       </TouchableOpacity>
@@ -86,9 +88,271 @@ const ar = StyleSheet.create({
   notes:   { fontSize:10, fontStyle:'italic', marginTop:3 },
 });
 
-function FLabel({ label, c }) {
-  return <Text style={{ fontSize:9, fontWeight:'600', letterSpacing:0.8, marginBottom:3, marginTop:10, color:c.textMuted, fontFamily:MONO }}>{label.toUpperCase()}</Text>;
-}
+// ─── Assignment Modal (isolated — reads theme internally, never re-renders from parent) ──
+
+const AssignmentModal = React.memo(function AssignmentModal({ visible, initialValues, onSave, onClose }) {
+  const { theme } = useTheme();
+  const c = theme.colors;
+
+  const [name,          setName]          = useState('');
+  const [type,          setType]          = useState('Homework');
+  const [hasDue,        setHasDue]        = useState(false);
+  const [date,          setDate]          = useState(new Date());
+  const [grade,         setGrade]         = useState('');
+  const [notes,         setNotes]         = useState('');
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  // Populate / reset whenever the modal opens or switches between add and edit
+  useEffect(() => {
+    if (!visible) return;
+    if (initialValues) {
+      setName(initialValues.name  || '');
+      setType(initialValues.type  || 'Homework');
+      setGrade(initialValues.grade || '');
+      setNotes(initialValues.notes || '');
+      setHasDue(!!initialValues.due);
+      setDate(initialValues.due ? new Date(initialValues.due + 'T12:00:00') : new Date());
+    } else {
+      setName(''); setType('Homework'); setGrade(''); setNotes('');
+      setHasDue(false); setDate(new Date());
+    }
+    setShowDatePicker(false);
+  }, [visible, initialValues]);
+
+  const handleSave = () => {
+    if (!name.trim()) return Alert.alert('Required', 'Assignment name is required.');
+    onSave(
+      { name: name.trim(), type, due: hasDue ? fmtDateKey(date) : '', grade: grade.trim(), notes: notes.trim() },
+      initialValues?.id ?? null,
+    );
+  };
+
+  const isEdit = !!initialValues;
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={ms.overlay}>
+        <View style={[ms.sheet, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+          <View style={[ms.header, { borderBottomColor: c.borderSubtle }]}>
+            <Text style={[ms.title, { color: c.textPrimary, fontFamily: MONO }]}>
+              {isEdit ? 'Edit Assignment' : 'Add Assignment'}
+            </Text>
+            <TouchableOpacity style={[ms.closeBtn, { backgroundColor: c.bgBase, borderColor: c.borderSubtle }]} onPress={onClose}>
+              <Text style={{ color: c.textMuted, fontSize: 14 }}>×</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={ms.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+
+            <FLabel label="Name *" c={c} />
+            <TextInput
+              style={[ms.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
+              value={name} onChangeText={setName}
+              placeholder="Assignment name" placeholderTextColor={c.textMuted}
+              autoCorrect={false}
+            />
+
+            <FLabel label="Type" c={c} />
+            <View style={[ms.pickerBox, { borderColor: c.borderSubtle, backgroundColor: c.bgBase }]}>
+              <Picker selectedValue={type} onValueChange={setType}
+                style={{ color: c.textPrimary }} dropdownIconColor={c.textMuted}
+                itemStyle={{ fontSize: 13, color: c.textPrimary, fontFamily: MONO }}>
+                {ASSIGN_TYPES.map(t => <Picker.Item key={t} label={t} value={t} color={c.textPrimary} />)}
+              </Picker>
+            </View>
+
+            <View style={ms.switchRow}>
+              <Text style={[ms.switchLabel, { color: c.textMuted, fontFamily: MONO }]}>Has due date</Text>
+              <Switch value={hasDue} onValueChange={setHasDue}
+                trackColor={{ false: c.borderSubtle, true: c.blueGlow }}
+                thumbColor={hasDue ? c.blue : c.textMuted} />
+            </View>
+
+            {hasDue && (
+              <>
+                <FLabel label="Due Date" c={c} />
+                <TouchableOpacity
+                  style={[ms.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase }]}
+                  onPress={() => setShowDatePicker(true)}
+                >
+                  <Text style={{ color: c.textPrimary, fontFamily: MONO, fontSize: 12 }}>
+                    {date.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}
+                  </Text>
+                </TouchableOpacity>
+                {showDatePicker && (
+                  <DateTimePicker
+                    value={date} mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={(e, d) => {
+                      if (Platform.OS === 'android') setShowDatePicker(false);
+                      if (d) setDate(d);
+                    }}
+                    textColor={c.textPrimary}
+                  />
+                )}
+              </>
+            )}
+
+            <View style={ms.row}>
+              <View style={{ flex: 1, marginRight: 8 }}>
+                <FLabel label="Grade" c={c} />
+                <TextInput
+                  style={[ms.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
+                  value={grade} onChangeText={setGrade}
+                  placeholder="e.g. 95 or A-" placeholderTextColor={c.textMuted}
+                />
+              </View>
+              <View style={{ flex: 1, marginLeft: 8 }}>
+                <FLabel label="Notes" c={c} />
+                <TextInput
+                  style={[ms.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
+                  value={notes} onChangeText={setNotes}
+                  placeholder="Optional" placeholderTextColor={c.textMuted}
+                />
+              </View>
+            </View>
+
+            <View style={[ms.actions, { borderTopColor: c.borderSubtle }]}>
+              <TouchableOpacity onPress={onClose} style={[ms.btn, { borderColor: c.borderSubtle, backgroundColor: c.bgBase }]}>
+                <Text style={[ms.btnTxt, { color: c.textMuted, fontFamily: MONO }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleSave} style={[ms.btn, { backgroundColor: c.blueGlow, borderColor: c.blue }]}>
+                <Text style={[ms.btnTxt, { color: c.blue, fontFamily: MONO }]}>{isEdit ? 'Save Changes' : 'Add Assignment'}</Text>
+              </TouchableOpacity>
+            </View>
+
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+});
+
+// ─── Edit Course Modal (isolated — same pattern) ───────────────────────────────
+
+const EditCourseModal = React.memo(function EditCourseModal({ visible, initialValues, onSave, onClose }) {
+  const { theme } = useTheme();
+  const c = theme.colors;
+
+  const [name,  setName]  = useState('');
+  const [code,  setCode]  = useState('');
+  const [prof,  setProf]  = useState('');
+  const [sem,   setSem]   = useState('');
+  const [creds, setCreds] = useState('3');
+  const [color, setColor] = useState(COLORS[0]);
+
+  useEffect(() => {
+    if (!visible || !initialValues) return;
+    setName(initialValues.name      || '');
+    setCode(initialValues.code      || '');
+    setProf(initialValues.professor || '');
+    setSem(initialValues.semester   || '');
+    setCreds(String(initialValues.credits || 3));
+    setColor(initialValues.color    || COLORS[0]);
+  }, [visible, initialValues]);
+
+  const handleSave = () => {
+    if (!name.trim()) return Alert.alert('Required', 'Course name is required.');
+    onSave({ name: name.trim(), code: code.trim(), professor: prof.trim(), semester: sem.trim(), credits: parseInt(creds) || 3, color });
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={ms.overlay}>
+        <View style={[ms.sheet, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+          <View style={[ms.header, { borderBottomColor: c.borderSubtle }]}>
+            <Text style={[ms.title, { color: c.textPrimary, fontFamily: MONO }]}>Edit Course</Text>
+            <TouchableOpacity style={[ms.closeBtn, { backgroundColor: c.bgBase, borderColor: c.borderSubtle }]} onPress={onClose}>
+              <Text style={{ color: c.textMuted, fontSize: 14 }}>×</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={ms.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+
+            <FLabel label="Course Name *" c={c} />
+            <TextInput
+              style={[ms.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
+              value={name} onChangeText={setName}
+              placeholder="e.g. American History" placeholderTextColor={c.textMuted}
+            />
+
+            <View style={ms.row}>
+              <View style={{ flex: 1, marginRight: 8 }}>
+                <FLabel label="Course Code" c={c} />
+                <TextInput
+                  style={[ms.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
+                  value={code} onChangeText={setCode}
+                  placeholder="HIST201" placeholderTextColor={c.textMuted}
+                  autoCorrect={false} autoCapitalize="characters"
+                />
+              </View>
+              <View style={{ flex: 1, marginLeft: 8 }}>
+                <FLabel label="Credits" c={c} />
+                <TextInput
+                  style={[ms.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
+                  value={creds} onChangeText={setCreds}
+                  keyboardType="number-pad" placeholder="3" placeholderTextColor={c.textMuted}
+                />
+              </View>
+            </View>
+
+            <FLabel label="Professor" c={c} />
+            <TextInput
+              style={[ms.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
+              value={prof} onChangeText={setProf}
+              placeholder="Prof. Benowitz" placeholderTextColor={c.textMuted}
+            />
+
+            <FLabel label="Semester" c={c} />
+            <TextInput
+              style={[ms.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
+              value={sem} onChangeText={setSem}
+              placeholder="Fall 2026" placeholderTextColor={c.textMuted}
+            />
+
+            <FLabel label="Color" c={c} />
+            <View style={ms.colorRow}>
+              {COLORS.map(col => (
+                <TouchableOpacity key={col} onPress={() => setColor(col)}
+                  style={[ms.swatch, { backgroundColor: col, borderWidth: color === col ? 3 : 0, borderColor: '#fff' }]} />
+              ))}
+            </View>
+
+            <View style={[ms.actions, { borderTopColor: c.borderSubtle }]}>
+              <TouchableOpacity onPress={onClose} style={[ms.btn, { borderColor: c.borderSubtle, backgroundColor: c.bgBase }]}>
+                <Text style={[ms.btnTxt, { color: c.textMuted, fontFamily: MONO }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleSave} style={[ms.btn, { backgroundColor: c.blueGlow, borderColor: c.blue }]}>
+                <Text style={[ms.btnTxt, { color: c.blue, fontFamily: MONO }]}>Save Changes</Text>
+              </TouchableOpacity>
+            </View>
+
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+});
+
+// Shared modal stylesheet
+const ms = StyleSheet.create({
+  overlay:   { flex:1, justifyContent:'flex-end', backgroundColor:'rgba(0,0,0,0.45)' },
+  sheet:     { flex:1, marginTop:72, borderTopLeftRadius:20, borderTopRightRadius:20, borderTopWidth:1, borderLeftWidth:1, borderRightWidth:1, overflow:'hidden' },
+  header:    { flexDirection:'row', alignItems:'center', justifyContent:'space-between', padding:16, borderBottomWidth:1 },
+  title:     { fontSize:15, fontWeight:'600', flex:1, marginRight:10 },
+  closeBtn:  { width:28, height:28, borderRadius:14, borderWidth:1, alignItems:'center', justifyContent:'center' },
+  body:      { padding:18, paddingBottom:36 },
+  input:     { borderWidth:1, borderRadius:6, paddingHorizontal:10, paddingVertical:7, fontSize:12, marginBottom:2 },
+  pickerBox: { borderWidth:1, borderRadius:6, marginBottom:2, overflow:'hidden' },
+  switchRow: { flexDirection:'row', alignItems:'center', marginTop:10, marginBottom:4 },
+  switchLabel:{ flex:1, fontSize:12 },
+  row:       { flexDirection:'row' },
+  colorRow:  { flexDirection:'row', flexWrap:'wrap', gap:10, marginTop:6, marginBottom:6 },
+  swatch:    { width:28, height:28, borderRadius:14 },
+  actions:   { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginTop:18, paddingTop:14, borderTopWidth:1 },
+  btn:       { borderWidth:1, borderRadius:20, paddingVertical:7, paddingHorizontal:18 },
+  btnTxt:    { fontSize:12, fontWeight:'600' },
+});
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
@@ -98,54 +362,80 @@ export default function ClassDetailScreen({ route, navigation }) {
   const { user }  = useAuth();
   const c = theme.colors;
 
-  const [courses,    setCourses]    = useState([]);
-  const [idCounter,  setIdCounter]  = useState(1);
-  const [loading,    setLoading]    = useState(true);
-  const [saved,      setSaved]      = useState(false);
+  // ── Data state ──────────────────────────────────────────
+  const [courses,      setCourses]      = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [saved,        setSaved]        = useState(false);
 
-  // Inline grade & notes state (saves on blur)
+  // Inline fields — save on blur, live in parent (not inside a modal)
   const [currentGrade, setCurrentGrade] = useState('');
   const [finalGrade,   setFinalGrade]   = useState('');
   const [courseNotes,  setCourseNotes]  = useState('');
 
-  // Assignment modal
-  const [assignModal,  setAssignModal]  = useState(false);
-  const [editingAssign, setEditingAssign] = useState(null); // null = add, object = edit
-  const [fName,   setFName]   = useState('');
-  const [fType,   setFType]   = useState('Homework');
-  const [fDate,   setFDate]   = useState(new Date());
-  const [fGrade,  setFGrade]  = useState('');
-  const [fNotes,  setFNotes]  = useState('');
-  const [fHasDue, setFHasDue] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
+  // Modal visibility + seed data (only these stay in parent)
+  const [assignModal,    setAssignModal]    = useState(false);
+  const [editingAssign,  setEditingAssign]  = useState(null); // null=add, object=edit
+  const [editCourseModal, setEditCourseModal] = useState(false);
+  const [editCourseSnap, setEditCourseSnap]  = useState(null); // snapshot passed to EditCourseModal
 
-  // Edit course modal
-  const [editModal,   setEditModal]   = useState(false);
-  const [eName,   setEName]   = useState('');
-  const [eCode,   setECode]   = useState('');
-  const [eProf,   setEProf]   = useState('');
-  const [eSem,    setESem]    = useState('');
-  const [eCreds,  setECreds]  = useState('');
-  const [eColor,  setEColor]  = useState(COLORS[0]);
+  // ── Refs — keep latest values for stable callbacks ──────
+  const coursesRef    = useRef(courses);
+  const courseIdRef   = useRef(courseId);
+  const userRef       = useRef(user);
+  const navigationRef = useRef(navigation);
+  useEffect(() => { coursesRef.current    = courses;    }, [courses]);
+  useEffect(() => { courseIdRef.current   = courseId;   }, [courseId]);
+  useEffect(() => { userRef.current       = user;       }, [user]);
+  useEffect(() => { navigationRef.current = navigation; }, [navigation]);
 
-  const docRef = () =>
-    firebase.firestore().collection('users').doc(user.uid).collection('localStorage').doc('data');
-
-  const flash = () => { setSaved(true); setTimeout(() => setSaved(false), 1500); };
-
-  const persist = async (updCourses) => {
-    try {
-      await docRef().set({ acad_courses: JSON.stringify(updCourses) }, { merge: true });
-      flash();
-    } catch (err) { Alert.alert('Save error', err.message); }
+  // ── Firestore write (reads from refs so it can be called from stable callbacks)
+  const writeFirestore = async (updCourses) => {
+    const uid = userRef.current?.uid;
+    if (!uid) return;
+    await firebase.firestore()
+      .collection('users').doc(uid)
+      .collection('localStorage').doc('data')
+      .set({ acad_courses: JSON.stringify(updCourses) }, { merge: true });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
   };
 
-  const updateCourse = async (fields) => {
-    const updated = courses.map(c2 => c2.id === courseId ? { ...c2, ...fields } : c2);
-    setCourses(updated);
-    await persist(updated);
-  };
+  // ── Stable callbacks — passed to React.memo modals ─────
+  // Empty dep arrays intentional: refs give us fresh values at call time.
 
+  const onSaveAssignStable = useCallback(async (fields, editingId) => {
+    const allCourses = coursesRef.current;
+    const cId        = courseIdRef.current;
+    const course     = allCourses.find(c2 => c2.id === cId);
+    const assigns    = course?.assignments || [];
+    const updAssigns = editingId != null
+      ? assigns.map(a => a.id === editingId ? { ...a, ...fields } : a)
+      : [...assigns, { id: Date.now(), done: false, ...fields }];
+    const updCourses = allCourses.map(c2 => c2.id === cId ? { ...c2, assignments: updAssigns } : c2);
+    setCourses(updCourses);
+    setAssignModal(false);
+    try { await writeFirestore(updCourses); }
+    catch (err) { Alert.alert('Save error', err.message); }
+  }, []);
+
+  const onCloseAssignStable = useCallback(() => setAssignModal(false), []);
+
+  const onSaveEditCourseStable = useCallback(async (fields) => {
+    const allCourses = coursesRef.current;
+    const cId        = courseIdRef.current;
+    const updCourses = allCourses.map(c2 => c2.id === cId ? { ...c2, ...fields } : c2);
+    setCourses(updCourses);
+    setEditCourseModal(false);
+    navigationRef.current?.setOptions({
+      title: fields.code ? `${fields.code} — ${fields.name}` : fields.name,
+    });
+    try { await writeFirestore(updCourses); }
+    catch (err) { Alert.alert('Save error', err.message); }
+  }, []);
+
+  const onCloseEditCourseStable = useCallback(() => setEditCourseModal(false), []);
+
+  // ── Load ────────────────────────────────────────────────
   useEffect(() => {
     if (user) load();
   }, [user]);
@@ -153,117 +443,112 @@ export default function ClassDetailScreen({ route, navigation }) {
   const load = async () => {
     setLoading(true);
     try {
-      const snap = await docRef().get();
-      const d = snap.exists ? snap.data() : {};
+      const uid  = user?.uid;
+      if (!uid) return;
+      const snap = await firebase.firestore()
+        .collection('users').doc(uid)
+        .collection('localStorage').doc('data').get();
+      const d      = snap.exists ? snap.data() : {};
       const loaded = JSON.parse(d.acad_courses || '[]');
       setCourses(loaded);
-      setIdCounter(parseInt(d.acad_id_counter || '1'));
-      const course = loaded.find(c2 => c2.id === courseId);
-      if (course) {
-        setCurrentGrade(course.currentGrade || '');
-        setFinalGrade(course.finalGrade || '');
-        setCourseNotes(course.notes || '');
+      const found = loaded.find(c2 => c2.id === courseId);
+      if (found) {
+        setCurrentGrade(found.currentGrade || '');
+        setFinalGrade(found.finalGrade   || '');
+        setCourseNotes(found.notes        || '');
         navigation.setOptions({
-          title: course.code ? `${course.code} — ${course.name}` : course.name,
+          title: found.code ? `${found.code} — ${found.name}` : found.name,
         });
       }
     } catch (err) { Alert.alert('Load error', err.message); }
     finally { setLoading(false); }
   };
 
-  const course = courses.find(c2 => c2.id === courseId);
-
-  // ── Assignment CRUD ──────────────────────────────────────
-
-  const openAddAssign = () => {
-    setEditingAssign(null);
-    setFName(''); setFType('Homework'); setFGrade(''); setFNotes('');
-    setFDate(new Date()); setFHasDue(false);
-    setAssignModal(true);
+  // ── Inline-field save (blur) ─────────────────────────────
+  const saveField = async (fields) => {
+    const allCourses = coursesRef.current;
+    const cId        = courseIdRef.current;
+    const updCourses = allCourses.map(c2 => c2.id === cId ? { ...c2, ...fields } : c2);
+    setCourses(updCourses);
+    try { await writeFirestore(updCourses); }
+    catch (err) { Alert.alert('Save error', err.message); }
   };
 
-  const openEditAssign = (a) => {
-    setEditingAssign(a);
-    setFName(a.name || ''); setFType(a.type || 'Homework');
-    setFGrade(a.grade || ''); setFNotes(a.notes || '');
-    setFHasDue(!!a.due);
-    setFDate(a.due ? new Date(a.due + 'T12:00:00') : new Date());
-    setAssignModal(true);
-  };
-
-  const saveAssign = async () => {
-    if (!fName.trim()) return Alert.alert('Required', 'Assignment name is required.');
-    const assignments = course?.assignments || [];
-    let updAssignments;
-    if (editingAssign) {
-      updAssignments = assignments.map(a =>
-        a.id === editingAssign.id
-          ? { ...a, name:fName.trim(), type:fType, due: fHasDue ? fmtDateKey(fDate) : '', grade:fGrade.trim(), notes:fNotes.trim() }
-          : a
-      );
-    } else {
-      const newAssign = { id: Date.now(), name:fName.trim(), type:fType, due: fHasDue ? fmtDateKey(fDate) : '', done:false, grade:fGrade.trim(), notes:fNotes.trim() };
-      updAssignments = [...assignments, newAssign];
-    }
-    setAssignModal(false);
-    await updateCourse({ assignments: updAssignments });
-  };
+  // ── Assignment actions ───────────────────────────────────
+  const openAddAssign  = () => { setEditingAssign(null); setAssignModal(true); };
+  const openEditAssign = (a) => { setEditingAssign(a);   setAssignModal(true); };
 
   const toggleDone = async (assignId) => {
-    const assignments = (course?.assignments || []).map(a =>
-      a.id === assignId ? { ...a, done: !a.done } : a
-    );
-    await updateCourse({ assignments });
+    const allCourses = coursesRef.current;
+    const cId        = courseIdRef.current;
+    const course     = allCourses.find(c2 => c2.id === cId);
+    const assigns    = (course?.assignments || []).map(a => a.id === assignId ? { ...a, done: !a.done } : a);
+    const updCourses = allCourses.map(c2 => c2.id === cId ? { ...c2, assignments: assigns } : c2);
+    setCourses(updCourses);
+    try { await writeFirestore(updCourses); }
+    catch (err) { Alert.alert('Save error', err.message); }
   };
 
   const deleteAssign = (assignId) => {
     Alert.alert('Delete assignment?', '', [
       { text:'Cancel', style:'cancel' },
       { text:'Delete', style:'destructive', onPress: async () => {
-        const assignments = (course?.assignments || []).filter(a => a.id !== assignId);
-        await updateCourse({ assignments });
+        const allCourses = coursesRef.current;
+        const cId        = courseIdRef.current;
+        const course     = allCourses.find(c2 => c2.id === cId);
+        const assigns    = (course?.assignments || []).filter(a => a.id !== assignId);
+        const updCourses = allCourses.map(c2 => c2.id === cId ? { ...c2, assignments: assigns } : c2);
+        setCourses(updCourses);
+        try { await writeFirestore(updCourses); }
+        catch (err) { Alert.alert('Save error', err.message); }
       }},
     ]);
   };
 
-  // ── Edit course ─────────────────────────────────────────
-
+  // ── Course actions ───────────────────────────────────────
   const openEditCourse = () => {
+    const course = coursesRef.current.find(c2 => c2.id === courseIdRef.current);
     if (!course) return;
-    setEName(course.name || ''); setECode(course.code || '');
-    setEProf(course.professor || ''); setESem(course.semester || '');
-    setECreds(String(course.credits || 3)); setEColor(course.color || COLORS[0]);
-    setEditModal(true);
+    setEditCourseSnap({ ...course }); // stable snapshot, won't change until next open
+    setEditCourseModal(true);
   };
-
-  const saveEditCourse = async () => {
-    if (!eName.trim()) return Alert.alert('Required', 'Course name is required.');
-    const fields = { name:eName.trim(), code:eCode.trim(), professor:eProf.trim(), semester:eSem.trim(), credits:parseInt(eCreds)||3, color:eColor };
-    setEditModal(false);
-    navigation.setOptions({ title: eCode.trim() ? `${eCode.trim()} — ${eName.trim()}` : eName.trim() });
-    await updateCourse(fields);
-  };
-
-  // ── Archive / Delete ────────────────────────────────────
 
   const toggleArchive = async () => {
-    await updateCourse({ archived: !course?.archived });
+    const allCourses = coursesRef.current;
+    const cId        = courseIdRef.current;
+    const course     = allCourses.find(c2 => c2.id === cId);
+    const updCourses = allCourses.map(c2 => c2.id === cId ? { ...c2, archived: !course?.archived } : c2);
+    setCourses(updCourses);
+    try { await writeFirestore(updCourses); }
+    catch (err) { Alert.alert('Save error', err.message); }
   };
 
   const deleteCourse = () => {
     Alert.alert('Delete course?', 'This will remove all assignments. This cannot be undone.', [
       { text:'Cancel', style:'cancel' },
       { text:'Delete', style:'destructive', onPress: async () => {
-        const updated = courses.filter(c2 => c2.id !== courseId);
+        const uid = userRef.current?.uid;
+        if (!uid) return;
+        const updated = coursesRef.current.filter(c2 => c2.id !== courseIdRef.current);
         setCourses(updated);
-        await persist(updated);
-        navigation.goBack();
+        try {
+          await firebase.firestore().collection('users').doc(uid)
+            .collection('localStorage').doc('data')
+            .set({ acad_courses: JSON.stringify(updated) }, { merge: true });
+          navigation.goBack();
+        } catch (err) { Alert.alert('Save error', err.message); }
       }},
     ]);
   };
 
-  if (loading || !course) {
-    return <View style={[s.centered, { backgroundColor:c.bgBase }]}><ActivityIndicator color={c.blue} size="large" /></View>;
+  // ── Render ──────────────────────────────────────────────
+  if (loading) {
+    return <View style={[s.centered, { backgroundColor: c.bgBase }]}><ActivityIndicator color={c.blue} size="large" /></View>;
+  }
+
+  const course     = courses.find(c2 => c2.id === courseId);
+  if (!course) {
+    return <View style={[s.centered, { backgroundColor: c.bgBase }]}><Text style={{ color: c.textMuted }}>Course not found.</Text></View>;
   }
 
   const incomplete = (course.assignments || []).filter(a => !a.done);
@@ -302,7 +587,7 @@ export default function ClassDetailScreen({ route, navigation }) {
             <TextInput
               style={[s.input, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:c.textPrimary, fontFamily:MONO }]}
               value={currentGrade} onChangeText={setCurrentGrade}
-              onBlur={() => updateCourse({ currentGrade })}
+              onBlur={() => saveField({ currentGrade })}
               placeholder="e.g. B+ or 91.4%" placeholderTextColor={c.textMuted}
             />
           </View>
@@ -311,7 +596,7 @@ export default function ClassDetailScreen({ route, navigation }) {
             <TextInput
               style={[s.input, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:c.textPrimary, fontFamily:MONO }]}
               value={finalGrade} onChangeText={setFinalGrade}
-              onBlur={() => updateCourse({ finalGrade })}
+              onBlur={() => saveField({ finalGrade })}
               placeholder="e.g. A-" placeholderTextColor={c.textMuted}
               autoCapitalize="characters"
             />
@@ -356,7 +641,7 @@ export default function ClassDetailScreen({ route, navigation }) {
           style={[s.notesInput, { borderColor:c.borderSubtle, backgroundColor:c.bgCard, color:c.textPrimary, fontFamily:MONO }]}
           value={courseNotes}
           onChangeText={setCourseNotes}
-          onBlur={() => updateCourse({ notes: courseNotes })}
+          onBlur={() => saveField({ notes: courseNotes })}
           placeholder="Notes, reminders, links…"
           placeholderTextColor={c.textMuted}
           multiline
@@ -374,131 +659,19 @@ export default function ClassDetailScreen({ route, navigation }) {
 
       </ScrollView>
 
-      {/* ── Add/Edit Assignment Modal ────────────────── */}
-      <Modal visible={assignModal} animationType="slide" transparent onRequestClose={() => setAssignModal(false)}>
-        <View style={s.modalOverlay}>
-          <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'}
-            style={[s.modalSheet, { backgroundColor:c.bgCard, borderColor:c.borderSubtle }]}>
-            <View style={[s.modalHeader, { borderBottomColor:c.borderSubtle }]}>
-              <Text style={[s.modalTitle, { color:c.textPrimary, fontFamily:MONO }]}>{editingAssign ? 'Edit Assignment' : 'Add Assignment'}</Text>
-              <TouchableOpacity style={[s.closeBtn, { backgroundColor:c.bgBase, borderColor:c.borderSubtle }]} onPress={() => setAssignModal(false)}>
-                <Text style={{ color:c.textMuted, fontSize:14 }}>×</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={{ flex:1 }} contentContainerStyle={s.modalBody} keyboardShouldPersistTaps="handled">
-
-              <FLabel label="Name *" c={c} />
-              <TextInput style={[s.input, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:c.textPrimary, fontFamily:MONO }]}
-                value={fName} onChangeText={setFName} placeholder="Assignment name" placeholderTextColor={c.textMuted} />
-
-              <FLabel label="Type" c={c} />
-              <View style={[s.pickerBox, { borderColor:c.borderSubtle, backgroundColor:c.bgBase }]}>
-                <Picker selectedValue={fType} onValueChange={setFType} style={{ color:c.textPrimary }} dropdownIconColor={c.textMuted}
-                  itemStyle={{ fontSize:13, color:c.textPrimary, fontFamily:MONO }}>
-                  {ASSIGN_TYPES.map(t => <Picker.Item key={t} label={t} value={t} color={c.textPrimary} />)}
-                </Picker>
-              </View>
-
-              <View style={[s.gradeRow, { alignItems:'center', marginTop:0 }]}>
-                <Text style={[s.switchLabel, { color:c.textMuted, fontFamily:MONO }]}>Has due date</Text>
-                <Switch value={fHasDue} onValueChange={setFHasDue}
-                  trackColor={{ false:c.borderSubtle, true:c.blueGlow }} thumbColor={fHasDue?c.blue:c.textMuted} />
-              </View>
-
-              {fHasDue && (
-                <>
-                  <FLabel label="Due Date" c={c} />
-                  <TouchableOpacity style={[s.input, { borderColor:c.borderSubtle, backgroundColor:c.bgBase }]} onPress={() => setShowDatePicker(true)}>
-                    <Text style={{ color:c.textPrimary, fontFamily:MONO, fontSize:12 }}>{fDate.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}</Text>
-                  </TouchableOpacity>
-                  {showDatePicker && (
-                    <DateTimePicker value={fDate} mode="date"
-                      display={Platform.OS==='ios'?'spinner':'default'}
-                      onChange={(e, d) => { if (Platform.OS==='android') setShowDatePicker(false); if (d) setFDate(d); }}
-                      textColor={c.textPrimary} />
-                  )}
-                </>
-              )}
-
-              <View style={s.gradeRow}>
-                <View style={{ flex:1, marginRight:8 }}>
-                  <FLabel label="Grade" c={c} />
-                  <TextInput style={[s.input, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:c.textPrimary, fontFamily:MONO }]}
-                    value={fGrade} onChangeText={setFGrade} placeholder="e.g. 95 or A-" placeholderTextColor={c.textMuted} />
-                </View>
-                <View style={{ flex:1, marginLeft:8 }}>
-                  <FLabel label="Notes" c={c} />
-                  <TextInput style={[s.input, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:c.textPrimary, fontFamily:MONO }]}
-                    value={fNotes} onChangeText={setFNotes} placeholder="Optional" placeholderTextColor={c.textMuted} />
-                </View>
-              </View>
-
-              <View style={[s.modalActions, { borderTopColor:c.borderSubtle }]}>
-                <TouchableOpacity onPress={() => setAssignModal(false)} style={[s.actionBtn, { borderColor:c.borderSubtle, backgroundColor:c.bgBase }]}>
-                  <Text style={[s.actionTxt, { color:c.textMuted, fontFamily:MONO }]}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={saveAssign} style={[s.actionBtn, { backgroundColor:c.blueGlow, borderColor:c.blue }]}>
-                  <Text style={[s.actionTxt, { color:c.blue, fontFamily:MONO }]}>{editingAssign ? 'Save Changes' : 'Add Assignment'}</Text>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </KeyboardAvoidingView>
-        </View>
-      </Modal>
-
-      {/* ── Edit Course Modal ────────────────────────── */}
-      <Modal visible={editModal} animationType="slide" transparent onRequestClose={() => setEditModal(false)}>
-        <View style={s.modalOverlay}>
-          <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'}
-            style={[s.modalSheet, { backgroundColor:c.bgCard, borderColor:c.borderSubtle }]}>
-            <View style={[s.modalHeader, { borderBottomColor:c.borderSubtle }]}>
-              <Text style={[s.modalTitle, { color:c.textPrimary, fontFamily:MONO }]}>Edit Course</Text>
-              <TouchableOpacity style={[s.closeBtn, { backgroundColor:c.bgBase, borderColor:c.borderSubtle }]} onPress={() => setEditModal(false)}>
-                <Text style={{ color:c.textMuted, fontSize:14 }}>×</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={{ flex:1 }} contentContainerStyle={s.modalBody} keyboardShouldPersistTaps="handled">
-              <FLabel label="Course Name *" c={c} />
-              <TextInput style={[s.input, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:c.textPrimary, fontFamily:MONO }]}
-                value={eName} onChangeText={setEName} placeholder="e.g. American History" placeholderTextColor={c.textMuted} />
-              <View style={s.gradeRow}>
-                <View style={{ flex:1, marginRight:8 }}>
-                  <FLabel label="Course Code" c={c} />
-                  <TextInput style={[s.input, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:c.textPrimary, fontFamily:MONO }]}
-                    value={eCode} onChangeText={setECode} placeholder="HIST201" placeholderTextColor={c.textMuted} />
-                </View>
-                <View style={{ flex:1, marginLeft:8 }}>
-                  <FLabel label="Credits" c={c} />
-                  <TextInput style={[s.input, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:c.textPrimary, fontFamily:MONO }]}
-                    value={eCreds} onChangeText={setECreds} keyboardType="number-pad" placeholder="3" placeholderTextColor={c.textMuted} />
-                </View>
-              </View>
-              <FLabel label="Professor" c={c} />
-              <TextInput style={[s.input, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:c.textPrimary, fontFamily:MONO }]}
-                value={eProf} onChangeText={setEProf} placeholder="Prof. Benowitz" placeholderTextColor={c.textMuted} />
-              <FLabel label="Semester" c={c} />
-              <TextInput style={[s.input, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:c.textPrimary, fontFamily:MONO }]}
-                value={eSem} onChangeText={setESem} placeholder="Fall 2026" placeholderTextColor={c.textMuted} />
-              <FLabel label="Color" c={c} />
-              <View style={s.colorRow}>
-                {COLORS.map(col => (
-                  <TouchableOpacity key={col} onPress={() => setEColor(col)}
-                    style={[s.colorSwatch, { backgroundColor:col, borderWidth: eColor===col ? 3 : 0, borderColor:'#fff' }]} />
-                ))}
-              </View>
-              <View style={[s.modalActions, { borderTopColor:c.borderSubtle }]}>
-                <TouchableOpacity onPress={() => setEditModal(false)} style={[s.actionBtn, { borderColor:c.borderSubtle, backgroundColor:c.bgBase }]}>
-                  <Text style={[s.actionTxt, { color:c.textMuted, fontFamily:MONO }]}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={saveEditCourse} style={[s.actionBtn, { backgroundColor:c.blueGlow, borderColor:c.blue }]}>
-                  <Text style={[s.actionTxt, { color:c.blue, fontFamily:MONO }]}>Save Changes</Text>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </KeyboardAvoidingView>
-        </View>
-      </Modal>
-
+      {/* Isolated modals — never re-render from parent state changes */}
+      <AssignmentModal
+        visible={assignModal}
+        initialValues={editingAssign}
+        onSave={onSaveAssignStable}
+        onClose={onCloseAssignStable}
+      />
+      <EditCourseModal
+        visible={editCourseModal}
+        initialValues={editCourseSnap}
+        onSave={onSaveEditCourseStable}
+        onClose={onCloseEditCourseStable}
+      />
     </View>
   );
 }
@@ -519,8 +692,6 @@ const s = StyleSheet.create({
 
   gradeRow:     { flexDirection:'row' },
   input:        { borderWidth:1, borderRadius:6, paddingHorizontal:10, paddingVertical:7, fontSize:12, marginBottom:2 },
-  pickerBox:    { borderWidth:1, borderRadius:6, marginBottom:2, overflow:'hidden' },
-  switchLabel:  { flex:1, fontSize:12 },
 
   sectionHead:  { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginTop:18, marginBottom:8 },
   secLabel:     { fontSize:10, fontWeight:'600', letterSpacing:1 },
@@ -529,24 +700,11 @@ const s = StyleSheet.create({
   doneHeader:   { fontSize:9, fontWeight:'600', letterSpacing:1, marginTop:10, marginBottom:6 },
   emptyNote:    { fontSize:11, fontStyle:'italic', marginBottom:8 },
 
-  notesInput:   { borderWidth:1, borderRadius:8, padding:12, fontSize:12, minHeight:80, textAlignVertical:'top', marginTop:0 },
+  notesInput:   { borderWidth:1, borderRadius:8, padding:12, fontSize:12, minHeight:80, textAlignVertical:'top' },
 
   actionsRow:   { flexDirection:'row', justifyContent:'space-between', marginTop:24, paddingTop:16, borderTopWidth:1, gap:10 },
   archiveBtn:   { flex:1, borderWidth:1, borderRadius:20, paddingVertical:8, alignItems:'center' },
   archiveTxt:   { fontSize:12, fontWeight:'600' },
   deleteBtn:    { flex:1, borderWidth:1, borderRadius:20, paddingVertical:8, alignItems:'center' },
   deleteTxt:    { fontSize:12, fontWeight:'600' },
-
-  colorRow:     { flexDirection:'row', flexWrap:'wrap', gap:10, marginTop:6, marginBottom:6 },
-  colorSwatch:  { width:28, height:28, borderRadius:14 },
-
-  modalOverlay: { flex:1, justifyContent:'flex-end', backgroundColor:'rgba(0,0,0,0.45)' },
-  modalSheet:   { flex:1, marginTop:72, borderTopLeftRadius:20, borderTopRightRadius:20, borderTopWidth:1, borderLeftWidth:1, borderRightWidth:1, overflow:'hidden' },
-  modalHeader:  { flexDirection:'row', alignItems:'center', justifyContent:'space-between', padding:16, borderBottomWidth:1 },
-  modalTitle:   { fontSize:15, fontWeight:'600', flex:1, marginRight:10 },
-  closeBtn:     { width:28, height:28, borderRadius:14, borderWidth:1, alignItems:'center', justifyContent:'center' },
-  modalBody:    { padding:18, paddingBottom:36 },
-  modalActions: { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginTop:18, paddingTop:14, borderTopWidth:1 },
-  actionBtn:    { borderWidth:1, borderRadius:20, paddingVertical:7, paddingHorizontal:18 },
-  actionTxt:    { fontSize:12, fontWeight:'600' },
 });
