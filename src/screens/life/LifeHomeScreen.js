@@ -21,14 +21,6 @@ const SECTIONS = [
     label: 'Career',
     tools: [
       {
-        id: 're',
-        title: 'Resume',
-        description: 'Inline editing, experience, skills, honors, PDF export.',
-        icon: '📄',
-        accent: 'purple',
-        route: 'Resume',
-      },
-      {
         id: 'nw',
         title: 'Network',
         description: 'Personal CRM — contacts, relationship strength, follow-ups.',

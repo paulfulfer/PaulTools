@@ -25,7 +25,6 @@ import ClubDistancesScreen from '../screens/golf/ClubDistancesScreen';
 import LifeHomeScreen from '../screens/life/LifeHomeScreen';
 import AcademicPlannerScreen from '../screens/life/AcademicPlannerScreen';
 import ClassDetailScreen from '../screens/life/ClassDetailScreen';
-import ResumeScreen from '../screens/life/ResumeScreen';
 import NetworkScreen from '../screens/life/NetworkScreen';
 import WorkoutTrackerScreen from '../screens/life/WorkoutTrackerScreen';
 
@@ -89,7 +88,6 @@ function LifeNavigator() {
       <Life.Screen name="LifeHome" component={LifeHomeScreen} options={{ title: 'Life' }} />
       <Life.Screen name="AcademicPlanner" component={AcademicPlannerScreen} options={{ title: 'Academic Planner' }} />
       <Life.Screen name="ClassDetail" component={ClassDetailScreen} options={{ title: 'Course' }} />
-      <Life.Screen name="Resume" component={ResumeScreen} options={{ title: 'Resume' }} />
       <Life.Screen name="Network" component={NetworkScreen} options={{ title: 'Network' }} />
       <Life.Screen name="WorkoutTracker" component={WorkoutTrackerScreen} options={{ title: 'Workout Tracker' }} />
     </Life.Navigator>
