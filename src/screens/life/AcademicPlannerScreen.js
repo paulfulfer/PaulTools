@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TextInput, TouchableOpacity,
   StyleSheet, Alert, Platform, Modal, KeyboardAvoidingView,
@@ -134,7 +134,13 @@ function FLabel({ label, c }) {
 
 // ─── Add Course Modal (isolated component so form state never re-renders parent) ──
 
-function AddCourseModal({ visible, onSave, onClose, c }) {
+// Wrapped in React.memo + reads theme internally so no prop change can re-render it
+// while the user is typing. Only re-renders when `visible` changes.
+const AddCourseModal = React.memo(function AddCourseModal({ visible, onSave, onClose }) {
+  // Own copies of theme — not passed from parent so parent re-renders are invisible here
+  const { theme } = useTheme();
+  const c = theme.colors;
+
   const [name,  setName]  = useState('');
   const [code,  setCode]  = useState('');
   const [prof,  setProf]  = useState('');
@@ -142,7 +148,6 @@ function AddCourseModal({ visible, onSave, onClose, c }) {
   const [creds, setCreds] = useState('3');
   const [color, setColor] = useState(COLORS[0]);
 
-  // Reset every time the modal opens
   useEffect(() => {
     if (visible) {
       setName(''); setCode(''); setProf('');
@@ -158,16 +163,20 @@ function AddCourseModal({ visible, onSave, onClose, c }) {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={s.modalOverlay}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={[s.modalSheet, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+        {/* No KeyboardAvoidingView on Android — it reshuffles layout and dismisses keyboard */}
+        <View style={[s.modalSheet, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
           <View style={[s.modalHeader, { borderBottomColor: c.borderSubtle }]}>
             <Text style={[s.modalTitle, { color: c.textPrimary, fontFamily: MONO }]}>Add Course</Text>
             <TouchableOpacity style={[s.closeBtn, { backgroundColor: c.bgBase, borderColor: c.borderSubtle }]} onPress={onClose}>
               <Text style={{ color: c.textMuted, fontSize: 14 }}>×</Text>
             </TouchableOpacity>
           </View>
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={s.modalBody} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={s.modalBody}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
             <FLabel label="Course Name *" c={c} />
             <TextInput
               style={[s.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
@@ -229,13 +238,12 @@ function AddCourseModal({ visible, onSave, onClose, c }) {
                 <Text style={[s.actionTxt, { color: c.blue, fontFamily: MONO }]}>Add Course</Text>
               </TouchableOpacity>
             </View>
-
           </ScrollView>
-        </KeyboardAvoidingView>
+        </View>
       </View>
     </Modal>
   );
-}
+});
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
@@ -254,36 +262,67 @@ export default function AcademicPlannerScreen({ navigation }) {
 
   const [showModal, setShowModal] = useState(false);
 
-  const docRef = () =>
-    firebase.firestore().collection('users').doc(user.uid).collection('localStorage').doc('data');
+  // ── Refs: keep latest values accessible in stable callbacks ──────────────────
+  const coursesRef = useRef(courses);
+  const counterRef = useRef(idCounter);
+  const userRef    = useRef(user);
+  useEffect(() => { coursesRef.current = courses;   }, [courses]);
+  useEffect(() => { counterRef.current = idCounter; }, [idCounter]);
+  useEffect(() => { userRef.current    = user;      }, [user]);
 
-  const flash = () => { setSaved(true); setTimeout(() => setSaved(false), 1500); };
-
-  const persist = async (updCourses, updCounter) => {
-    try {
-      await docRef().set({
-        acad_courses:     JSON.stringify(updCourses),
-        acad_id_counter:  String(updCounter),
-      }, { merge: true });
-      flash();
-    } catch (err) { Alert.alert('Save error', err.message); }
+  // ── Firestore helpers ──────────────────────────────────────────────────────
+  const getDocRef = () => {
+    const uid = userRef.current?.uid;
+    if (!uid) return null;
+    return firebase.firestore().collection('users').doc(uid).collection('localStorage').doc('data');
   };
 
-  const load = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
+  // ── useFocusEffect — MUST NOT be async directly ────────────────────────────
+  useFocusEffect(
+    React.useCallback(() => {
+      const load = async () => {
+        if (!userRef.current) return;
+        setLoading(true);
+        try {
+          const ref  = getDocRef();
+          if (!ref) return;
+          const snap = await ref.get();
+          const d    = snap.exists ? snap.data() : {};
+          const loaded = JSON.parse(d.acad_courses || '[]');
+          const ctr    = parseInt(d.acad_id_counter || '1');
+          setCourses(loaded);
+          setIdCounter(ctr);
+        } catch (err) { Alert.alert('Load error', err.message); }
+        finally { setLoading(false); }
+      };
+      load();
+    }, []) // empty deps — userRef.current is read at call time, not capture time
+  );
+
+  // ── Stable onSave for AddCourseModal (never changes reference) ─────────────
+  // Reads latest data via refs so React.memo(AddCourseModal) never re-renders
+  // due to this prop changing.
+  const onSaveStable = useCallback(async (fields) => {
+    const uid = userRef.current?.uid;
+    if (!uid) return;
+    const newId      = counterRef.current;
+    const course     = { id: newId, ...fields, archived: false, currentGrade: '', finalGrade: '', assignments: [], notes: '' };
+    const updCourses = [...coursesRef.current, course];
+    const newCounter = newId + 1;
+    setCourses(updCourses);
+    setIdCounter(newCounter);
+    setShowModal(false);
     try {
-      const snap = await docRef().get();
-      const d = snap.exists ? snap.data() : {};
-      setCourses(JSON.parse(d.acad_courses || '[]'));
-      setIdCounter(parseInt(d.acad_id_counter || '1'));
-    } catch (err) { Alert.alert('Load error', err.message); }
-    finally { setLoading(false); }
-  }, [user]);
+      await firebase.firestore().collection('users').doc(uid).collection('localStorage').doc('data')
+        .set({ acad_courses: JSON.stringify(updCourses), acad_id_counter: String(newCounter) }, { merge: true });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    } catch (err) { Alert.alert('Save error', err.message); }
+  }, []); // stable — empty deps intentional
 
-  useFocusEffect(load);
+  const onCloseStable = useCallback(() => setShowModal(false), []);
 
-  // Computed
+  // ── Computed ──────────────────────────────────────────────────────────────
   const active   = courses.filter(c2 => !c2.archived);
   const archived = courses.filter(c2 =>  c2.archived);
   const graded   = courses.filter(c2 => c2.finalGrade && letterToGpa(c2.finalGrade) !== null);
@@ -296,7 +335,6 @@ export default function AcademicPlannerScreen({ navigation }) {
     gpaSub = `${graded.length} graded course${graded.length !== 1 ? 's' : ''}`;
   }
 
-  const today = new Date(); today.setHours(0, 0, 0, 0);
   const upcoming = active
     .flatMap(c2 => (c2.assignments || []).filter(a => !a.done).map(a => ({ ...a, courseName: c2.code || c2.name, courseColor: c2.color || '#2a7de1', courseId: c2.id })))
     .sort((a, b) => {
@@ -305,16 +343,6 @@ export default function AcademicPlannerScreen({ navigation }) {
       return new Date(a.due) - new Date(b.due);
     })
     .slice(0, 20);
-
-  // Receives validated data from AddCourseModal
-  const handleSaveCourse = async (fields) => {
-    const newId = idCounter;
-    const course = { id: newId, ...fields, archived: false, currentGrade: '', finalGrade: '', assignments: [], notes: '' };
-    const updCourses = [...courses, course];
-    const newCounter = idCounter + 1;
-    setCourses(updCourses); setIdCounter(newCounter); setShowModal(false);
-    await persist(updCourses, newCounter);
-  };
 
   if (loading) {
     return <View style={[s.centered, { backgroundColor:c.bgBase }]}><ActivityIndicator color={c.blue} size="large" /></View>;
@@ -404,9 +432,8 @@ export default function AcademicPlannerScreen({ navigation }) {
 
       <AddCourseModal
         visible={showModal}
-        onSave={handleSaveCourse}
-        onClose={() => setShowModal(false)}
-        c={c}
+        onSave={onSaveStable}
+        onClose={onCloseStable}
       />
     </View>
   );
