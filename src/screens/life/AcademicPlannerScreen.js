@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, ScrollView, TextInput, TouchableOpacity,
   StyleSheet, Alert, Platform, Modal, KeyboardAvoidingView,
@@ -132,6 +132,111 @@ function FLabel({ label, c }) {
   return <Text style={{ fontSize:9, fontWeight:'600', letterSpacing:0.8, marginBottom:3, marginTop:10, color:c.textMuted, fontFamily:MONO }}>{label.toUpperCase()}</Text>;
 }
 
+// ─── Add Course Modal (isolated component so form state never re-renders parent) ──
+
+function AddCourseModal({ visible, onSave, onClose, c }) {
+  const [name,  setName]  = useState('');
+  const [code,  setCode]  = useState('');
+  const [prof,  setProf]  = useState('');
+  const [sem,   setSem]   = useState('');
+  const [creds, setCreds] = useState('3');
+  const [color, setColor] = useState(COLORS[0]);
+
+  // Reset every time the modal opens
+  useEffect(() => {
+    if (visible) {
+      setName(''); setCode(''); setProf('');
+      setSem(''); setCreds('3'); setColor(COLORS[0]);
+    }
+  }, [visible]);
+
+  const handleSave = () => {
+    if (!name.trim()) return Alert.alert('Required', 'Course name is required.');
+    onSave({ name: name.trim(), code: code.trim(), professor: prof.trim(), semester: sem.trim(), credits: parseInt(creds) || 3, color });
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={s.modalOverlay}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={[s.modalSheet, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+          <View style={[s.modalHeader, { borderBottomColor: c.borderSubtle }]}>
+            <Text style={[s.modalTitle, { color: c.textPrimary, fontFamily: MONO }]}>Add Course</Text>
+            <TouchableOpacity style={[s.closeBtn, { backgroundColor: c.bgBase, borderColor: c.borderSubtle }]} onPress={onClose}>
+              <Text style={{ color: c.textMuted, fontSize: 14 }}>×</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={s.modalBody} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+
+            <FLabel label="Course Name *" c={c} />
+            <TextInput
+              style={[s.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
+              value={name} onChangeText={setName}
+              placeholder="e.g. American History" placeholderTextColor={c.textMuted}
+              autoCorrect={false}
+            />
+
+            <View style={s.formRow}>
+              <View style={{ flex: 1, marginRight: 8 }}>
+                <FLabel label="Course Code" c={c} />
+                <TextInput
+                  style={[s.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
+                  value={code} onChangeText={setCode}
+                  placeholder="HIST201" placeholderTextColor={c.textMuted}
+                  autoCorrect={false} autoCapitalize="characters"
+                />
+              </View>
+              <View style={{ flex: 1, marginLeft: 8 }}>
+                <FLabel label="Credit Hours" c={c} />
+                <TextInput
+                  style={[s.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
+                  value={creds} onChangeText={setCreds}
+                  keyboardType="number-pad" placeholder="3" placeholderTextColor={c.textMuted}
+                />
+              </View>
+            </View>
+
+            <FLabel label="Professor" c={c} />
+            <TextInput
+              style={[s.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
+              value={prof} onChangeText={setProf}
+              placeholder="e.g. Prof. Benowitz" placeholderTextColor={c.textMuted}
+            />
+
+            <FLabel label="Semester" c={c} />
+            <TextInput
+              style={[s.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
+              value={sem} onChangeText={setSem}
+              placeholder="e.g. Fall 2026" placeholderTextColor={c.textMuted}
+            />
+
+            <FLabel label="Color" c={c} />
+            <View style={s.colorRow}>
+              {COLORS.map(col => (
+                <TouchableOpacity
+                  key={col}
+                  onPress={() => setColor(col)}
+                  style={[s.colorSwatch, { backgroundColor: col, borderWidth: color === col ? 3 : 0, borderColor: '#fff' }]}
+                />
+              ))}
+            </View>
+
+            <View style={[s.modalActions, { borderTopColor: c.borderSubtle }]}>
+              <TouchableOpacity onPress={onClose} style={[s.actionBtn, { borderColor: c.borderSubtle, backgroundColor: c.bgBase }]}>
+                <Text style={[s.actionTxt, { color: c.textMuted, fontFamily: MONO }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleSave} style={[s.actionBtn, { backgroundColor: c.blueGlow, borderColor: c.blue }]}>
+                <Text style={[s.actionTxt, { color: c.blue, fontFamily: MONO }]}>Add Course</Text>
+              </TouchableOpacity>
+            </View>
+
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </View>
+    </Modal>
+  );
+}
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function AcademicPlannerScreen({ navigation }) {
@@ -147,14 +252,7 @@ export default function AcademicPlannerScreen({ navigation }) {
   const [open, setOpen] = useState({ upcoming:true, active:true, archived:false });
   const toggle = key => setOpen(p => ({ ...p, [key]:!p[key] }));
 
-  // Add course modal
-  const [showModal,  setShowModal]  = useState(false);
-  const [formName,   setFormName]   = useState('');
-  const [formCode,   setFormCode]   = useState('');
-  const [formProf,   setFormProf]   = useState('');
-  const [formSem,    setFormSem]    = useState('');
-  const [formCreds,  setFormCreds]  = useState('3');
-  const [formColor,  setFormColor]  = useState(COLORS[0]);
+  const [showModal, setShowModal] = useState(false);
 
   const docRef = () =>
     firebase.firestore().collection('users').doc(user.uid).collection('localStorage').doc('data');
@@ -208,25 +306,12 @@ export default function AcademicPlannerScreen({ navigation }) {
     })
     .slice(0, 20);
 
-  // Add course
-  const openAdd = () => {
-    setFormName(''); setFormCode(''); setFormProf('');
-    setFormSem(''); setFormCreds('3'); setFormColor(COLORS[0]);
-    setShowModal(true);
-  };
-
-  const saveAdd = async () => {
-    if (!formName.trim()) return Alert.alert('Required', 'Course name is required.');
+  // Receives validated data from AddCourseModal
+  const handleSaveCourse = async (fields) => {
     const newId = idCounter;
-    const course = {
-      id: newId, name: formName.trim(), code: formCode.trim(),
-      professor: formProf.trim(), semester: formSem.trim(),
-      credits: parseInt(formCreds) || 3, color: formColor,
-      archived: false, currentGrade: '', finalGrade: '',
-      assignments: [], notes: '',
-    };
-    const updCourses  = [...courses, course];
-    const newCounter  = idCounter + 1;
+    const course = { id: newId, ...fields, archived: false, currentGrade: '', finalGrade: '', assignments: [], notes: '' };
+    const updCourses = [...courses, course];
+    const newCounter = idCounter + 1;
     setCourses(updCourses); setIdCounter(newCounter); setShowModal(false);
     await persist(updCourses, newCounter);
   };
@@ -289,7 +374,7 @@ export default function AcademicPlannerScreen({ navigation }) {
                 />
               ))}
             </View>
-            <TouchableOpacity style={[s.addBubble, { borderColor:c.borderSubtle }]} onPress={openAdd}>
+            <TouchableOpacity style={[s.addBubble, { borderColor:c.borderSubtle }]} onPress={() => setShowModal(true)}>
               <Text style={[s.addBubbleTxt, { color:c.textMuted, fontFamily:MONO }]}>+ Add Course</Text>
             </TouchableOpacity>
           </>
@@ -317,66 +402,12 @@ export default function AcademicPlannerScreen({ navigation }) {
 
       </ScrollView>
 
-      {/* ── Add Course Modal ───────────────────────── */}
-      <Modal visible={showModal} animationType="slide" transparent onRequestClose={() => setShowModal(false)}>
-        <View style={s.modalOverlay}>
-          <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'}
-            style={[s.modalSheet, { backgroundColor:c.bgCard, borderColor:c.borderSubtle }]}>
-            <View style={[s.modalHeader, { borderBottomColor:c.borderSubtle }]}>
-              <Text style={[s.modalTitle, { color:c.textPrimary, fontFamily:MONO }]}>Add Course</Text>
-              <TouchableOpacity style={[s.closeBtn, { backgroundColor:c.bgBase, borderColor:c.borderSubtle }]} onPress={() => setShowModal(false)}>
-                <Text style={{ color:c.textMuted, fontSize:14 }}>×</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={{ flex:1 }} contentContainerStyle={s.modalBody} keyboardShouldPersistTaps="handled">
-              <FLabel label="Course Name *" c={c} />
-              <TextInput style={[s.input, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:c.textPrimary, fontFamily:MONO }]}
-                value={formName} onChangeText={setFormName} placeholder="e.g. American History" placeholderTextColor={c.textMuted} />
-
-              <View style={s.formRow}>
-                <View style={{ flex:1, marginRight:8 }}>
-                  <FLabel label="Course Code" c={c} />
-                  <TextInput style={[s.input, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:c.textPrimary, fontFamily:MONO }]}
-                    value={formCode} onChangeText={setFormCode} placeholder="HIST201" placeholderTextColor={c.textMuted} />
-                </View>
-                <View style={{ flex:1, marginLeft:8 }}>
-                  <FLabel label="Credit Hours" c={c} />
-                  <TextInput style={[s.input, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:c.textPrimary, fontFamily:MONO }]}
-                    value={formCreds} onChangeText={setFormCreds} keyboardType="number-pad" placeholder="3" placeholderTextColor={c.textMuted} />
-                </View>
-              </View>
-
-              <FLabel label="Professor" c={c} />
-              <TextInput style={[s.input, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:c.textPrimary, fontFamily:MONO }]}
-                value={formProf} onChangeText={setFormProf} placeholder="e.g. Prof. Benowitz" placeholderTextColor={c.textMuted} />
-
-              <FLabel label="Semester" c={c} />
-              <TextInput style={[s.input, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:c.textPrimary, fontFamily:MONO }]}
-                value={formSem} onChangeText={setFormSem} placeholder="e.g. Fall 2026" placeholderTextColor={c.textMuted} />
-
-              <FLabel label="Color" c={c} />
-              <View style={s.colorRow}>
-                {COLORS.map((col, i) => (
-                  <TouchableOpacity
-                    key={col}
-                    onPress={() => setFormColor(col)}
-                    style={[s.colorSwatch, { backgroundColor:col, borderWidth: formColor === col ? 3 : 0, borderColor: '#fff' }]}
-                  />
-                ))}
-              </View>
-
-              <View style={[s.modalActions, { borderTopColor:c.borderSubtle }]}>
-                <TouchableOpacity onPress={() => setShowModal(false)} style={[s.actionBtn, { borderColor:c.borderSubtle, backgroundColor:c.bgBase }]}>
-                  <Text style={[s.actionTxt, { color:c.textMuted, fontFamily:MONO }]}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={saveAdd} style={[s.actionBtn, { backgroundColor:c.blueGlow, borderColor:c.blue }]}>
-                  <Text style={[s.actionTxt, { color:c.blue, fontFamily:MONO }]}>Add Course</Text>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </KeyboardAvoidingView>
-        </View>
-      </Modal>
+      <AddCourseModal
+        visible={showModal}
+        onSave={handleSaveCourse}
+        onClose={() => setShowModal(false)}
+        c={c}
+      />
     </View>
   );
 }
