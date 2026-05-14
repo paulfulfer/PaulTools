@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+// NOTE: requires react-native-svg → run: npx expo install react-native-svg
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TextInput, TouchableOpacity,
   StyleSheet, Alert, Platform, Modal, ActivityIndicator,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
+import Svg, { Path, Circle } from 'react-native-svg';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
@@ -27,15 +29,36 @@ const CAT_COLOR = {
   Other:         '#aaaaaa',
 };
 
+const FREQS      = ['monthly', 'annual', 'weekly'];
+const FREQ_LABEL = { monthly: '/mo', annual: '/yr', weekly: '/wk' };
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmt$(n)  { return '$' + Math.abs(Number(n) || 0).toFixed(2); }
+
 function fmtDateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 function fmtDisplay(dateStr) {
-  const d = new Date(dateStr + 'T12:00:00');
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+function fmtRenewal(dateStr) {
+  if (!dateStr) return '—';
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function daysUntil(dateStr) {
+  if (!dateStr) return Infinity;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.round((new Date(dateStr + 'T00:00:00') - today) / 86400000);
+}
+
+function monthlyEq(sub) {
+  switch (sub.freq) {
+    case 'annual':  return sub.amount / 12;
+    case 'weekly':  return sub.amount * (52 / 12);
+    default:        return sub.amount;
+  }
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -56,15 +79,14 @@ const mc = StyleSheet.create({
   sub:   { fontSize: 9, marginTop: 2 },
 });
 
-function SecHeader({ title, open, onToggle, c }) {
+function SecHeader({ title, open, onToggle, right, c }) {
   return (
-    <TouchableOpacity
-      style={[sh.row, { borderBottomColor: c.borderSubtle }]}
-      onPress={onToggle}
-      activeOpacity={0.7}
-    >
+    <TouchableOpacity style={[sh.row, { borderBottomColor: c.borderSubtle }]} onPress={onToggle} activeOpacity={0.7}>
       <Text style={[sh.label, { color: c.textMuted, fontFamily: MONO }]}>{title.toUpperCase()}</Text>
-      <Text style={[sh.arrow, { color: c.textMuted }]}>{open ? '▲' : '▼'}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        {right}
+        <Text style={[sh.arrow, { color: c.textMuted }]}>{open ? '▲' : '▼'}</Text>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -79,6 +101,174 @@ function FLabel({ label, c }) {
 }
 const fl = StyleSheet.create({ t: { fontSize: 9, fontWeight: '600', letterSpacing: 0.8, marginBottom: 3, marginTop: 10 } });
 
+// ─── Donut Chart ──────────────────────────────────────────────────────────────
+
+function DonutChart({ catSorted, total, c }) {
+  if (!catSorted.length || total === 0) return null;
+
+  const SIZE   = 180;
+  const CX     = SIZE / 2;
+  const CY     = SIZE / 2;
+  const ROUTER = 72;
+  const RHOLE  = 44;
+  const GAP    = catSorted.length > 1 ? 0.025 : 0;
+
+  const polar = (angle, r) => [CX + r * Math.cos(angle), CY + r * Math.sin(angle)];
+
+  const wedgePath = (sa, ea) => {
+    const span = ea - sa;
+    if (span >= 2 * Math.PI - 0.001) {
+      // Full circle: two semicircle arcs from top
+      const [x1, y1] = polar(-Math.PI / 2, ROUTER);
+      const [x2, y2] = polar(Math.PI / 2,  ROUTER);
+      return `M ${CX} ${CY} L ${x1} ${y1} A ${ROUTER} ${ROUTER} 0 1 1 ${x2} ${y2} A ${ROUTER} ${ROUTER} 0 1 1 ${x1} ${y1} Z`;
+    }
+    const large = span > Math.PI ? 1 : 0;
+    const [sx, sy] = polar(sa, ROUTER);
+    const [ex, ey] = polar(ea, ROUTER);
+    return `M ${CX} ${CY} L ${sx} ${sy} A ${ROUTER} ${ROUTER} 0 ${large} 1 ${ex} ${ey} Z`;
+  };
+
+  let angle = -Math.PI / 2;
+  const slices = catSorted
+    .filter(([, v]) => v > 0)
+    .map(([cat, val]) => {
+      const sweep = (val / total) * 2 * Math.PI;
+      const sa = angle + GAP;
+      const ea = angle + sweep - GAP;
+      angle += sweep;
+      return { cat, sa, ea: Math.max(sa + 0.01, ea) };
+    });
+
+  return (
+    <View style={{ alignItems: 'center', marginVertical: 8 }}>
+      <Svg width={SIZE} height={SIZE}>
+        {slices.map(({ cat, sa, ea }) => (
+          <Path key={cat} d={wedgePath(sa, ea)} fill={CAT_COLOR[cat] || '#aaa'} />
+        ))}
+        {/* Donut hole overlay */}
+        <Circle cx={CX} cy={CY} r={RHOLE} fill={c.bgCard} />
+      </Svg>
+    </View>
+  );
+}
+
+// ─── Add Subscription Modal ───────────────────────────────────────────────────
+
+const AddSubModal = React.memo(function AddSubModal({ visible, onClose, onSave }) {
+  const { theme } = useTheme();
+  const c = theme.colors;
+
+  const [name,    setName]    = useState('');
+  const [amount,  setAmount]  = useState('');
+  const [freq,    setFreq]    = useState('monthly');
+  const [renewal, setRenewal] = useState(new Date());
+  const [picker,  setPicker]  = useState(false);
+
+  useEffect(() => {
+    if (visible) { setName(''); setAmount(''); setFreq('monthly'); setRenewal(new Date()); setPicker(false); }
+  }, [visible]);
+
+  const handleSave = () => {
+    if (!name.trim()) return Alert.alert('Required', 'Enter a subscription name.');
+    const amt = parseFloat(amount);
+    if (isNaN(amt) || amt <= 0) return Alert.alert('Required', 'Enter a valid amount.');
+    onSave({ name: name.trim(), amount: amt, freq, renewalDate: fmtDateKey(renewal) });
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={sm.overlay}>
+        <View style={[sm.sheet, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+          <View style={[sm.header, { borderBottomColor: c.borderSubtle }]}>
+            <Text style={[sm.title, { color: c.textPrimary, fontFamily: MONO }]}>Add Subscription</Text>
+            <TouchableOpacity onPress={onClose} style={[sm.closeBtn, { backgroundColor: c.bgBase, borderColor: c.borderSubtle }]}>
+              <Text style={{ color: c.textMuted, fontSize: 14 }}>×</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={sm.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+
+            <FLabel label="Name" c={c} />
+            <TextInput
+              style={[sm.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
+              value={name} onChangeText={setName}
+              placeholder="e.g. Netflix, Spotify, iCloud..." placeholderTextColor={c.textMuted} autoCorrect={false}
+            />
+
+            <FLabel label="Amount ($)" c={c} />
+            <TextInput
+              style={[sm.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.amber, fontFamily: MONO }]}
+              value={amount} onChangeText={setAmount}
+              placeholder="0.00" placeholderTextColor={c.textMuted} keyboardType="decimal-pad"
+            />
+
+            <FLabel label="Frequency" c={c} />
+            <View style={{ flexDirection: 'row', gap: 6, marginBottom: 2 }}>
+              {FREQS.map(f => (
+                <TouchableOpacity key={f} onPress={() => setFreq(f)}
+                  style={[sm.freqBtn, {
+                    borderColor:     freq === f ? c.amber : c.borderSubtle,
+                    backgroundColor: freq === f ? c.amberGlow : 'transparent',
+                  }]}>
+                  <Text style={[sm.freqTxt, { color: freq === f ? c.amber : c.textMuted, fontFamily: MONO }]}>
+                    {f.charAt(0).toUpperCase() + f.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <FLabel label="Next Renewal Date" c={c} />
+            <TouchableOpacity style={[sm.dateBtn, { borderColor: c.borderSubtle, backgroundColor: c.bgBase }]} onPress={() => setPicker(true)}>
+              <Text style={[sm.dateTxt, { color: c.textPrimary, fontFamily: MONO }]}>
+                {renewal.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              </Text>
+            </TouchableOpacity>
+
+            {picker && Platform.OS === 'android' && (
+              <DateTimePicker value={renewal} mode="date" display="default"
+                onChange={(e, d) => { setPicker(false); if (d) setRenewal(d); }} />
+            )}
+            {picker && Platform.OS === 'ios' && (
+              <>
+                <DateTimePicker value={renewal} mode="date" display="spinner"
+                  onChange={(e, d) => { if (d) setRenewal(d); }} />
+                <TouchableOpacity onPress={() => setPicker(false)} style={{ alignItems: 'flex-end', paddingRight: 4, paddingTop: 4 }}>
+                  <Text style={{ color: c.blue, fontWeight: '600', fontFamily: MONO }}>Done</Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            <View style={[sm.actions, { borderTopColor: c.borderSubtle }]}>
+              <TouchableOpacity onPress={onClose} style={[sm.btn, { borderColor: c.borderSubtle }]}>
+                <Text style={[sm.btnTxt, { color: c.textMuted, fontFamily: MONO }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleSave} style={[sm.btn, { borderColor: c.amber, backgroundColor: c.amberGlow }]}>
+                <Text style={[sm.btnTxt, { color: c.amber, fontFamily: MONO }]}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+});
+const sm = StyleSheet.create({
+  overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
+  sheet:   { borderTopLeftRadius: 20, borderTopRightRadius: 20, borderTopWidth: 1, borderLeftWidth: 1, borderRightWidth: 1, overflow: 'hidden' },
+  header:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1 },
+  title:   { fontSize: 15, fontWeight: '600', flex: 1 },
+  closeBtn:{ width: 28, height: 28, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  body:    { padding: 16, paddingBottom: 40 },
+  input:   { borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 7, fontSize: 12, marginBottom: 2 },
+  freqBtn: { flex: 1, borderWidth: 1.5, borderRadius: 8, paddingVertical: 7, alignItems: 'center' },
+  freqTxt: { fontSize: 11, fontWeight: '600' },
+  dateBtn: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8 },
+  dateTxt: { fontSize: 12 },
+  actions: { flexDirection: 'row', gap: 10, marginTop: 16, paddingTop: 14, borderTopWidth: 1 },
+  btn:     { flex: 1, borderWidth: 1, borderRadius: 20, paddingVertical: 7, alignItems: 'center' },
+  btnTxt:  { fontSize: 12, fontWeight: '600' },
+});
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function ExpenseLogScreen() {
@@ -86,191 +276,166 @@ export default function ExpenseLogScreen() {
   const { user }  = useAuth();
   const c = theme.colors;
 
-  // ── Data ────────────────────────────────────────────────
   const [entries, setEntries] = useState([]);
+  const [subs,    setSubs]    = useState([]);
   const [loading, setLoading] = useState(true);
   const [saved,   setSaved]   = useState(false);
 
-  // ── Sections ────────────────────────────────────────────
-  const [open, setOpen] = useState({ entry: true, breakdown: true, log: true });
+  const [open, setOpen] = useState({ entry: true, subs: true, breakdown: true, log: true });
   const toggle = key => setOpen(p => ({ ...p, [key]: !p[key] }));
 
-  // ── Form ────────────────────────────────────────────────
   const [formDesc, setFormDesc] = useState('');
   const [formCat,  setFormCat]  = useState('Food');
   const [formDate, setFormDate] = useState(new Date());
   const [formAmt,  setFormAmt]  = useState('');
   const [picker,   setPicker]   = useState({ show: false });
 
-  // ── Firestore path ──────────────────────────────────────
-  // Matches the shim: users/{uid}/localStorage/data  →  field: explog_entries (JSON string)
-  const docRef = () =>
-    firebase.firestore()
-      .collection('users').doc(user.uid)
-      .collection('localStorage').doc('data');
+  const [addSubModal, setAddSubModal] = useState(false);
 
-  // ── Load ────────────────────────────────────────────────
+  const subsRef = useRef(subs);
+  useEffect(() => { subsRef.current = subs; }, [subs]);
+
+  // ── Firestore ────────────────────────────────────────────
+
+  const docRef = () =>
+    firebase.firestore().collection('users').doc(user.uid).collection('localStorage').doc('data');
+
   useEffect(() => { if (user) load(); }, [user]);
 
   const load = async () => {
     setLoading(true);
     try {
       const snap = await docRef().get();
-      const raw  = snap.exists ? (snap.data().explog_entries || '[]') : '[]';
-      setEntries(JSON.parse(raw));
-    } catch (err) {
-      Alert.alert('Load error', err.message);
-    } finally {
-      setLoading(false);
-    }
+      const d    = snap.exists ? snap.data() : {};
+      setEntries(JSON.parse(d.explog_entries || '[]'));
+      setSubs(JSON.parse(d.explog_subs || '[]'));
+    } catch (err) { Alert.alert('Load error', err.message); }
+    finally { setLoading(false); }
   };
 
-  const persist = async (updated) => {
-    try {
-      await docRef().set(
-        { explog_entries: JSON.stringify(updated) },
-        { merge: true },   // preserve other pages' keys in the same doc
-      );
-      setSaved(true);
-      setTimeout(() => setSaved(false), 1500);
-    } catch (err) {
-      Alert.alert('Save error', err.message);
-    }
+  const flash = () => { setSaved(true); setTimeout(() => setSaved(false), 1500); };
+
+  const persistEntries = async (updated) => {
+    try { await docRef().set({ explog_entries: JSON.stringify(updated) }, { merge: true }); flash(); }
+    catch (err) { Alert.alert('Save error', err.message); }
   };
 
-  // ── Metrics ─────────────────────────────────────────────
-  const total = entries.reduce((s, e) => s + (e.amt || 0), 0);
+  const persistSubs = async (updated) => {
+    try { await docRef().set({ explog_subs: JSON.stringify(updated) }, { merge: true }); flash(); }
+    catch (err) { Alert.alert('Save error', err.message); }
+  };
 
-  const now = new Date();
-  const monthEntries = entries.filter(e => {
-    const d = new Date(e.date + 'T12:00:00');
-    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-  });
-  const monthTotal = monthEntries.reduce((s, e) => s + (e.amt || 0), 0);
-  const monthName  = now.toLocaleString('en-US', { month: 'long' });
+  // ── Metrics ──────────────────────────────────────────────
 
-  const largest = entries.length > 0 ? entries.reduce((a, b) => (a.amt > b.amt ? a : b)) : null;
+  const total       = entries.reduce((s, e) => s + (e.amt || 0), 0);
+  const now         = new Date();
+  const monthTotal  = entries
+    .filter(e => { const d = new Date(e.date + 'T12:00:00'); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); })
+    .reduce((s, e) => s + (e.amt || 0), 0);
+  const monthName   = now.toLocaleString('en-US', { month: 'long' });
+  const largest     = entries.length > 0 ? entries.reduce((a, b) => (a.amt > b.amt ? a : b)) : null;
 
-  // Per-category totals for breakdown
-  const catTotals = {};
+  const catTotals   = {};
   entries.forEach(e => { catTotals[e.cat] = (catTotals[e.cat] || 0) + (e.amt || 0); });
-  const catSorted = Object.entries(catTotals).sort((a, b) => b[1] - a[1]);
+  const catSorted   = Object.entries(catTotals).sort((a, b) => b[1] - a[1]);
 
-  // ── Log expense ─────────────────────────────────────────
+  const monthlyBurn = subs.reduce((acc, s) => acc + monthlyEq(s), 0);
+  const annualBurn  = monthlyBurn * 12;
+
+  // ── Handlers ─────────────────────────────────────────────
+
   const logExpense = async () => {
     const amt = parseFloat(formAmt);
-    if (!formDesc.trim())      return Alert.alert('Missing info', 'Enter a description.');
+    if (!formDesc.trim())       return Alert.alert('Missing info', 'Enter a description.');
     if (isNaN(amt) || amt <= 0) return Alert.alert('Missing info', 'Enter a valid amount.');
-    const entry = {
-      id:   Date.now(),
-      desc: formDesc.trim(),
-      cat:  formCat,
-      date: fmtDateKey(formDate),
-      amt,
-    };
+    const entry = { id: Date.now(), desc: formDesc.trim(), cat: formCat, date: fmtDateKey(formDate), amt };
     const updated = [entry, ...entries];
     setEntries(updated);
-    setFormDesc('');
-    setFormAmt('');
-    await persist(updated);
+    setFormDesc(''); setFormAmt('');
+    await persistEntries(updated);
   };
 
-  // ── Delete ──────────────────────────────────────────────
   const deleteEntry = id => {
     Alert.alert('Delete expense?', 'This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: async () => {
-          const updated = entries.filter(e => e.id !== id);
-          setEntries(updated);
-          await persist(updated);
-        },
-      },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        const updated = entries.filter(e => e.id !== id);
+        setEntries(updated);
+        await persistEntries(updated);
+      }},
     ]);
   };
 
-  // ── Date picker ─────────────────────────────────────────
+  const handleAddSub = useCallback(async (subData) => {
+    const updated = [...subsRef.current, { ...subData, id: Date.now() }];
+    setSubs(updated);
+    setAddSubModal(false);
+    await persistSubs(updated);
+  }, []);
+
+  const deleteSub = useCallback((id) => {
+    Alert.alert('Remove subscription?', '', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: async () => {
+        const updated = subsRef.current.filter(s => s.id !== id);
+        setSubs(updated);
+        await persistSubs(updated);
+      }},
+    ]);
+  }, []);
+
   const onDateChange = (event, selected) => {
     if (Platform.OS === 'android') setPicker({ show: false });
     if (!selected || event.type === 'dismissed') return;
     setFormDate(selected);
   };
 
+  // ─────────────────────────────────────────────────────────
+
   if (loading) {
-    return (
-      <View style={[s.centered, { backgroundColor: c.bgBase }]}>
-        <ActivityIndicator color={c.amber} size="large" />
-      </View>
-    );
+    return <View style={[s.centered, { backgroundColor: c.bgBase }]}><ActivityIndicator color={c.amber} size="large" /></View>;
   }
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bgBase }}>
 
-      {/* Saved flash */}
       {saved && (
         <View style={[s.savedBadge, { backgroundColor: c.greenGlow, borderColor: c.green }]}>
           <Text style={[s.savedText, { color: c.green, fontFamily: MONO }]}>✓ Saved</Text>
         </View>
       )}
 
-      <ScrollView
-        contentContainerStyle={s.scroll}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
+      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
         {/* ── Metrics ─────────────────────────────────── */}
         <View style={s.metRow}>
           <MetCard label="Total Logged" value={fmt$(total)}             sub="all categories"  color={c.amber}       c={c} />
           <MetCard label="This Month"   value={fmt$(monthTotal)}         sub={monthName}       color={c.textPrimary} c={c} />
           <MetCard label="Entries"      value={String(entries.length)}   sub="transactions"    color={c.blue}        c={c} />
-          <MetCard
-            label="Largest"
-            value={largest ? fmt$(largest.amt) : '—'}
-            sub={largest ? largest.desc.substring(0, 16) : ''}
-            color={c.textPrimary}
-            c={c}
-          />
+          <MetCard label="Largest"      value={largest ? fmt$(largest.amt) : '—'} sub={largest ? largest.desc.substring(0, 16) : ''} color={c.textPrimary} c={c} />
         </View>
 
         {/* ── Log an Expense ──────────────────────────── */}
         <SecHeader title="Log an Expense" open={open.entry} onToggle={() => toggle('entry')} c={c} />
         {open.entry && (
           <View style={[s.card, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
-
             <FLabel label="Description" c={c} />
             <TextInput
               style={[s.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
               placeholder="e.g. Gas fillup, lunch, new grip..."
-              placeholderTextColor={c.textMuted}
-              value={formDesc}
-              onChangeText={setFormDesc}
+              placeholderTextColor={c.textMuted} value={formDesc} onChangeText={setFormDesc}
             />
-
             <FLabel label="Category" c={c} />
             <View style={[s.pickerBox, { borderColor: c.borderSubtle, backgroundColor: c.bgBase }]}>
-              <Picker
-                selectedValue={formCat}
-                onValueChange={setFormCat}
-                style={{ color: c.textPrimary }}
-                dropdownIconColor={c.textMuted}
-                itemStyle={{ fontSize: 13, color: c.textPrimary, fontFamily: MONO }}
-              >
-                {CATEGORIES.map(cat => (
-                  <Picker.Item key={cat} label={cat} value={cat} color={c.textPrimary} />
-                ))}
+              <Picker selectedValue={formCat} onValueChange={setFormCat} style={{ color: c.textPrimary }}
+                dropdownIconColor={c.textMuted} itemStyle={{ fontSize: 13, color: c.textPrimary, fontFamily: MONO }}>
+                {CATEGORIES.map(cat => <Picker.Item key={cat} label={cat} value={cat} color={c.textPrimary} />)}
               </Picker>
             </View>
-
             <View style={s.formRow}>
               <View style={{ flex: 1, marginRight: 8 }}>
                 <FLabel label="Date" c={c} />
-                <TouchableOpacity
-                  style={[s.dtBtn, { borderColor: c.borderSubtle, backgroundColor: c.bgBase }]}
-                  onPress={() => setPicker({ show: true })}
-                >
+                <TouchableOpacity style={[s.dtBtn, { borderColor: c.borderSubtle, backgroundColor: c.bgBase }]} onPress={() => setPicker({ show: true })}>
                   <Text style={[s.dtText, { color: c.textPrimary, fontFamily: MONO }]}>
                     {formDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </Text>
@@ -280,22 +445,17 @@ export default function ExpenseLogScreen() {
                 <FLabel label="Amount ($)" c={c} />
                 <TextInput
                   style={[s.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.amber, fontFamily: MONO }]}
-                  placeholder="0.00"
-                  placeholderTextColor={c.textMuted}
-                  value={formAmt}
-                  onChangeText={setFormAmt}
-                  keyboardType="decimal-pad"
+                  placeholder="0.00" placeholderTextColor={c.textMuted}
+                  value={formAmt} onChangeText={setFormAmt} keyboardType="decimal-pad"
                 />
               </View>
             </View>
-
             <TouchableOpacity style={[s.logBtn, { backgroundColor: c.amberGlow, borderColor: c.amber }]} onPress={logExpense}>
               <Text style={[s.logBtnTxt, { color: c.amber, fontFamily: MONO }]}>+ Log Expense</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Date picker */}
         {picker.show && Platform.OS === 'android' && (
           <DateTimePicker value={formDate} mode="date" display="default" onChange={onDateChange} />
         )}
@@ -306,16 +466,89 @@ export default function ExpenseLogScreen() {
                 <TouchableOpacity onPress={() => setPicker({ show: false })} style={s.doneBtn}>
                   <Text style={[s.doneTxt, { color: c.blue, fontFamily: MONO }]}>Done</Text>
                 </TouchableOpacity>
-                <DateTimePicker
-                  value={formDate}
-                  mode="date"
-                  display="spinner"
-                  onChange={onDateChange}
-                  textColor={c.textPrimary}
-                />
+                <DateTimePicker value={formDate} mode="date" display="spinner" onChange={onDateChange} textColor={c.textPrimary} />
               </View>
             </View>
           </Modal>
+        )}
+
+        {/* ── Subscription Tracker ────────────────────── */}
+        <SecHeader
+          title="Subscriptions"
+          open={open.subs}
+          onToggle={() => toggle('subs')}
+          c={c}
+          right={
+            <TouchableOpacity onPress={() => setAddSubModal(true)}
+              style={[s.addSubBtn, { borderColor: c.amber, backgroundColor: c.amberGlow }]}>
+              <Text style={[s.addSubTxt, { color: c.amber, fontFamily: MONO }]}>+ Add</Text>
+            </TouchableOpacity>
+          }
+        />
+        {open.subs && (
+          <>
+            {/* Burn rate row */}
+            <View style={s.burnRow}>
+              <View style={[s.burnCard, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+                <Text style={[s.burnLabel, { color: c.textMuted, fontFamily: MONO }]}>MONTHLY BURN</Text>
+                <Text style={[s.burnVal,   { color: c.amber,     fontFamily: MONO }]}>{fmt$(monthlyBurn)}</Text>
+                <Text style={[s.burnSub,   { color: c.textMuted, fontFamily: MONO }]}>per month</Text>
+              </View>
+              <View style={[s.burnCard, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+                <Text style={[s.burnLabel, { color: c.textMuted, fontFamily: MONO }]}>ANNUAL BURN</Text>
+                <Text style={[s.burnVal,   { color: c.red,       fontFamily: MONO }]}>{fmt$(annualBurn)}</Text>
+                <Text style={[s.burnSub,   { color: c.textMuted, fontFamily: MONO }]}>per year</Text>
+              </View>
+              <View style={[s.burnCard, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+                <Text style={[s.burnLabel, { color: c.textMuted, fontFamily: MONO }]}>ACTIVE</Text>
+                <Text style={[s.burnVal,   { color: c.blue,      fontFamily: MONO }]}>{subs.length}</Text>
+                <Text style={[s.burnSub,   { color: c.textMuted, fontFamily: MONO }]}>subscriptions</Text>
+              </View>
+            </View>
+
+            {subs.length === 0 ? (
+              <View style={[s.empty, { borderColor: c.borderSubtle }]}>
+                <Text style={[s.emptyTxt, { color: c.textMuted, fontFamily: MONO }]}>No subscriptions yet. Tap + Add to start tracking.</Text>
+              </View>
+            ) : (
+              subs.map(sub => {
+                const days   = daysUntil(sub.renewalDate);
+                const soon   = days >= 0 && days <= 7;
+                const overdue = days < 0;
+                const warn   = soon || overdue;
+                return (
+                  <View key={sub.id} style={[s.subItem, { backgroundColor: c.bgCard, borderColor: warn ? c.amber : c.borderSubtle }]}>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <View style={s.subTopRow}>
+                        <Text style={[s.subName, { color: c.textPrimary, fontFamily: MONO }]} numberOfLines={1}>{sub.name}</Text>
+                        {warn && (
+                          <View style={[s.warnPill, { backgroundColor: c.amberGlow, borderColor: c.amber }]}>
+                            <Text style={{ color: c.amber, fontSize: 9, fontWeight: '700', fontFamily: MONO }}>
+                              {overdue ? 'OVERDUE' : days === 0 ? 'TODAY' : `${days}D`}
+                            </Text>
+                          </View>
+                        )}
+                        <Text style={[s.subAmt, { color: c.amber, fontFamily: MONO }]}>
+                          {fmt$(sub.amount)}{FREQ_LABEL[sub.freq] || '/mo'}
+                        </Text>
+                      </View>
+                      <View style={s.subBottomRow}>
+                        <Text style={[s.subMeta, { color: c.textMuted, fontFamily: MONO }]}>
+                          Renews {fmtRenewal(sub.renewalDate)}
+                        </Text>
+                        <Text style={[s.subMonthly, { color: c.textMuted, fontFamily: MONO }]}>
+                          {fmt$(monthlyEq(sub))}/mo
+                        </Text>
+                      </View>
+                    </View>
+                    <TouchableOpacity onPress={() => deleteSub(sub.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Text style={{ color: c.textMuted, fontSize: 14 }}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })
+            )}
+          </>
         )}
 
         {/* ── Category Breakdown ──────────────────────── */}
@@ -328,29 +561,37 @@ export default function ExpenseLogScreen() {
               </Text>
             ) : (
               <>
-                {catSorted.map(([cat, val]) => {
-                  const pct = total > 0 ? Math.min(100, (val / total) * 100) : 0;
-                  const color = CAT_COLOR[cat] || '#aaa';
-                  return (
-                    <View key={cat} style={s.barRow}>
-                      <Text style={[s.barLabel, { color: c.textMuted, fontFamily: MONO }]}>{cat}</Text>
-                      <View style={[s.barTrack, { backgroundColor: c.bgBase, borderColor: c.borderSubtle }]}>
-                        <View style={[s.barFill, { width: `${pct}%`, backgroundColor: color }]} />
-                      </View>
-                      <Text style={[s.barAmt, { color: c.textPrimary, fontFamily: MONO }]}>{fmt$(val)}</Text>
-                    </View>
-                  );
-                })}
-                {/* Category badges */}
-                <View style={s.badgeRow}>
+                {/* Donut chart */}
+                <DonutChart catSorted={catSorted} total={total} c={c} />
+
+                {/* Legend */}
+                <View style={s.legendRow}>
                   {catSorted.map(([cat, val]) => (
-                    <View key={cat} style={[s.badge, { backgroundColor: c.bgBase, borderColor: c.borderSubtle }]}>
-                      <View style={[s.badgeDot, { backgroundColor: CAT_COLOR[cat] || '#aaa' }]} />
-                      <Text style={[s.badgeTxt, { color: c.textSecondary, fontFamily: MONO }]}>
-                        {cat}: {fmt$(val)}
+                    <View key={cat} style={s.legendItem}>
+                      <View style={[s.legendDot, { backgroundColor: CAT_COLOR[cat] || '#aaa' }]} />
+                      <Text style={[s.legendCat, { color: c.textSecondary, fontFamily: MONO }]}>{cat}</Text>
+                      <Text style={[s.legendPct, { color: c.textMuted, fontFamily: MONO }]}>
+                        {total > 0 ? Math.round((val / total) * 100) : 0}%
                       </Text>
                     </View>
                   ))}
+                </View>
+
+                {/* Bar rows */}
+                <View style={{ marginTop: 10 }}>
+                  {catSorted.map(([cat, val]) => {
+                    const pct   = total > 0 ? Math.min(100, (val / total) * 100) : 0;
+                    const color = CAT_COLOR[cat] || '#aaa';
+                    return (
+                      <View key={cat} style={s.barRow}>
+                        <Text style={[s.barLabel, { color: c.textMuted, fontFamily: MONO }]}>{cat}</Text>
+                        <View style={[s.barTrack, { backgroundColor: c.bgBase, borderColor: c.borderSubtle }]}>
+                          <View style={[s.barFill, { width: `${pct}%`, backgroundColor: color }]} />
+                        </View>
+                        <Text style={[s.barAmt, { color: c.textPrimary, fontFamily: MONO }]}>{fmt$(val)}</Text>
+                      </View>
+                    );
+                  })}
                 </View>
               </>
             )}
@@ -369,9 +610,7 @@ export default function ExpenseLogScreen() {
               <View key={entry.id} style={[s.expItem, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
                 <View style={{ flex: 1 }}>
                   <View style={[s.expTop, { gap: 6 }]}>
-                    <Text style={[s.expDesc, { color: c.textPrimary, fontFamily: MONO }]} numberOfLines={1}>
-                      {entry.desc}
-                    </Text>
+                    <Text style={[s.expDesc, { color: c.textPrimary, fontFamily: MONO }]} numberOfLines={1}>{entry.desc}</Text>
                     <View style={[s.catPill, { backgroundColor: c.bgBase, borderColor: c.borderSubtle }]}>
                       <View style={[s.catDot, { backgroundColor: CAT_COLOR[entry.cat] || '#aaa' }]} />
                       <Text style={[s.catPillTxt, { color: c.textMuted, fontFamily: MONO }]}>{entry.cat}</Text>
@@ -391,6 +630,8 @@ export default function ExpenseLogScreen() {
         )}
 
       </ScrollView>
+
+      <AddSubModal visible={addSubModal} onClose={() => setAddSubModal(false)} onSave={handleAddSub} />
     </View>
   );
 }
@@ -411,27 +652,46 @@ const s = StyleSheet.create({
   logBtn:    { borderWidth: 1, borderRadius: 20, paddingVertical: 9, paddingHorizontal: 20, alignSelf: 'flex-end', marginTop: 12 },
   logBtnTxt: { fontSize: 12, fontWeight: '600', letterSpacing: 0.5 },
 
+  // Subscription tracker
+  addSubBtn:    { borderWidth: 1, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3 },
+  addSubTxt:    { fontSize: 10, fontWeight: '700' },
+  burnRow:      { flexDirection: 'row', gap: 6, marginBottom: 8 },
+  burnCard:     { flex: 1, borderWidth: 1, borderRadius: 8, padding: 10, alignItems: 'center' },
+  burnLabel:    { fontSize: 9, fontWeight: '700', letterSpacing: 0.6, marginBottom: 3 },
+  burnVal:      { fontSize: 18, fontWeight: '700', letterSpacing: -0.3 },
+  burnSub:      { fontSize: 9, marginTop: 2 },
+  subItem:      { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 5, gap: 8 },
+  subTopRow:    { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3, flexWrap: 'wrap' },
+  subName:      { fontSize: 12, fontWeight: '600', flexShrink: 1 },
+  subAmt:       { fontSize: 12, fontWeight: '700', marginLeft: 'auto' },
+  warnPill:     { borderWidth: 1, borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 },
+  subBottomRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  subMeta:      { fontSize: 10 },
+  subMonthly:   { fontSize: 10 },
+
+  // Donut chart legend
+  legendRow:  { flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginTop: 4 },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  legendDot:  { width: 8, height: 8, borderRadius: 4 },
+  legendCat:  { fontSize: 11 },
+  legendPct:  { fontSize: 10 },
+
   barRow:    { flexDirection: 'row', alignItems: 'center', marginBottom: 7, gap: 8 },
   barLabel:  { width: 100, fontSize: 11 },
   barTrack:  { flex: 1, height: 7, borderRadius: 4, borderWidth: 1, overflow: 'hidden' },
   barFill:   { height: '100%', borderRadius: 4 },
   barAmt:    { width: 58, textAlign: 'right', fontSize: 12, fontWeight: '600' },
 
-  badgeRow:  { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
-  badge:     { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 3 },
-  badgeDot:  { width: 7, height: 7, borderRadius: 4 },
-  badgeTxt:  { fontSize: 11 },
+  expItem:    { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 5, gap: 10 },
+  expTop:     { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 2 },
+  expDesc:    { fontSize: 12, fontWeight: '500', flexShrink: 1 },
+  expDate:    { fontSize: 11 },
+  expRight:   { alignItems: 'flex-end', gap: 6, flexShrink: 0 },
+  expAmt:     { fontSize: 13, fontWeight: '600' },
 
-  expItem:   { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 5, gap: 10 },
-  expTop:    { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 2 },
-  expDesc:   { fontSize: 12, fontWeight: '500', flexShrink: 1 },
-  expDate:   { fontSize: 11 },
-  expRight:  { alignItems: 'flex-end', gap: 6, flexShrink: 0 },
-  expAmt:    { fontSize: 13, fontWeight: '600' },
-
-  catPill:   { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 },
-  catDot:    { width: 6, height: 6, borderRadius: 3 },
-  catPillTxt:{ fontSize: 9, fontWeight: '600', letterSpacing: 0.4 },
+  catPill:    { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 },
+  catDot:     { width: 6, height: 6, borderRadius: 3 },
+  catPillTxt: { fontSize: 9, fontWeight: '600', letterSpacing: 0.4 },
 
   empty:     { borderWidth: 1, borderStyle: 'dashed', borderRadius: 8, padding: 28, alignItems: 'center', marginBottom: 6 },
   emptyTxt:  { fontSize: 12 },
