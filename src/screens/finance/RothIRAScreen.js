@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TextInput, TouchableOpacity,
   StyleSheet, Alert, Platform, Modal, ActivityIndicator,
@@ -11,8 +11,14 @@ import { useAuth } from '../../context/AuthContext';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const MONO  = Platform.select({ ios: 'Menlo', android: 'monospace' });
-const LIMIT = 7500;
+const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
+
+const YEAR_LIMITS = {
+  2019: 6000, 2020: 6000, 2021: 6000, 2022: 6000,
+  2023: 6500, 2024: 7500, 2025: 7500, 2026: 7500,
+  2027: 7500, 2028: 7500, 2029: 7500, 2030: 7500,
+};
+const getLimit = (year) => YEAR_LIMITS[year] || 7500;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -22,38 +28,19 @@ function fmt$(n, signed = false) {
   const num = Number(n) || 0;
   return (num < 0 ? '-' : num > 0 ? '+' : '') + abs;
 }
-
-function fmtBig(n) {
-  return '$' + Math.round(Math.abs(Number(n) || 0)).toLocaleString();
+function fmtBig(n) { return '$' + Math.round(Math.abs(Number(n) || 0)).toLocaleString(); }
+function fmtDateKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
-
-function fmtDateKey(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
 function fmtDisplay(dateStr) {
-  const d = new Date(dateStr + 'T12:00:00');
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  return new Date(dateStr+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'});
 }
-
+function getDepYear(dep) { return new Date(dep.date+'T00:00:00').getFullYear(); }
 function getYearPct() {
   const now   = new Date();
   const start = new Date(now.getFullYear(), 0, 1);
   const end   = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
-  return ((now - start) / (end - start)) * 100;
-}
-
-function projFinishDate(total, deposits) {
-  if (deposits.length < 2) return null;
-  const sorted = [...deposits].sort((a, b) => new Date(a.date) - new Date(b.date));
-  const daysSince = Math.max(1, (Date.now() - new Date(sorted[0].date + 'T00:00:00')) / 86400000);
-  const pace = total / daysSince;
-  if (pace <= 0) return null;
-  const rem = LIMIT - total;
-  if (rem <= 0) return 'Done';
-  const d = new Date();
-  d.setDate(d.getDate() + Math.ceil(rem / pace));
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return Math.min(100, ((now - start) / (end - start)) * 100);
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -87,16 +74,16 @@ function MetCard({ label, value, sub, color, fontSize, c }) {
   );
 }
 const mc = StyleSheet.create({
-  card:  { flex: 1, minWidth: '45%', borderWidth: 1, borderRadius: 8, padding: 10, margin: 3 },
+  card:  { flex: 1, minWidth: '30%', borderWidth: 1, borderRadius: 8, padding: 10, margin: 3 },
   label: { fontSize: 9, letterSpacing: 0.8, marginBottom: 3 },
-  value: { fontWeight: '600', letterSpacing: -0.3 },
+  value: { fontWeight: '700', letterSpacing: -0.3 },
   sub:   { fontSize: 9, marginTop: 2 },
 });
 
 function PaceBar({ label, pct, color, c }) {
   return (
     <View style={pb.row}>
-      <Text style={[pb.label, { color: c.textMuted, fontFamily: MONO }]}>{label}</Text>
+      <Text style={[pb.label, { color: c.textSecondary, fontFamily: MONO }]}>{label}</Text>
       <View style={[pb.track, { backgroundColor: c.bgBase, borderColor: c.borderSubtle }]}>
         <View style={[pb.fill, { width: `${Math.min(100, pct).toFixed(1)}%`, backgroundColor: color }]} />
       </View>
@@ -106,10 +93,26 @@ function PaceBar({ label, pct, color, c }) {
 }
 const pb = StyleSheet.create({
   row:   { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 },
-  label: { width: 100, fontSize: 11 },
-  track: { flex: 1, height: 7, borderRadius: 4, borderWidth: 1, overflow: 'hidden' },
-  fill:  { height: '100%', borderRadius: 4 },
+  label: { width: 110, fontSize: 11 },
+  track: { flex: 1, height: 6, borderRadius: 3, borderWidth: 1, overflow: 'hidden' },
+  fill:  { height: '100%', borderRadius: 3 },
   pct:   { width: 36, textAlign: 'right', fontSize: 11, fontWeight: '600' },
+});
+
+function RsBlock({ label, value, sub, color, c }) {
+  return (
+    <View style={[rs.block, { backgroundColor: c.bgBase }]}>
+      <Text style={[rs.label, { color: c.textMuted, fontFamily: MONO }]}>{label.toUpperCase()}</Text>
+      <Text style={[rs.value, { color: color || c.textPrimary, fontFamily: MONO }]}>{value}</Text>
+      {!!sub && <Text style={[rs.sub, { color: c.textMuted, fontFamily: MONO }]}>{sub}</Text>}
+    </View>
+  );
+}
+const rs = StyleSheet.create({
+  block: { flex: 1, minWidth: '45%', borderRadius: 8, padding: 12, margin: 3 },
+  label: { fontSize: 9, fontWeight: '600', letterSpacing: 0.8, marginBottom: 4 },
+  value: { fontSize: 20, fontWeight: '700', letterSpacing: -0.3 },
+  sub:   { fontSize: 10, marginTop: 3 },
 });
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
@@ -119,36 +122,31 @@ export default function RothIRAScreen() {
   const { user }  = useAuth();
   const c = theme.colors;
 
-  // ── Data ────────────────────────────────────────────────
-  const [deposits,         setDeposits]         = useState([]);
-  const [currentBalance,   setCurrentBalance]   = useState('');
-  const [beginningBalance, setBeginningBalance] = useState('');
+  const [deposits,       setDeposits]       = useState([]);
+  const [currentBalance, setCurrentBalance] = useState('');
   const [loading, setLoading] = useState(true);
   const [saved,   setSaved]   = useState(false);
 
-  // ── Sections ────────────────────────────────────────────
-  const [open, setOpen] = useState({ balance: true, returns: true, pace: true, projection: true, entry: true, history: true });
+  const [open, setOpen] = useState({
+    balance: true, years: true, maxout: false,
+    log: true, pace: true, deposits: true, projection: false,
+  });
   const toggle = key => setOpen(p => ({ ...p, [key]: !p[key] }));
 
-  // ── Deposit form ────────────────────────────────────────
   const [formLabel, setFormLabel] = useState('');
   const [formDate,  setFormDate]  = useState(new Date());
   const [formAmt,   setFormAmt]   = useState('');
   const [picker,    setPicker]    = useState({ show: false });
 
-  // ── Projection inputs ───────────────────────────────────
   const [projRate,      setProjRate]      = useState('7');
   const [projAge,       setProjAge]       = useState('20');
   const [projTargetAge, setProjTargetAge] = useState('65');
 
-  // ── Firestore ───────────────────────────────────────────
-  // Shares the same doc as ExpenseLog and other shim pages
-  const docRef = () =>
-    firebase.firestore()
-      .collection('users').doc(user.uid)
-      .collection('localStorage').doc('data');
+  // ── Firestore ──────────────────────────────────────────────────────────────
 
-  // ── Load ────────────────────────────────────────────────
+  const docRef = () =>
+    firebase.firestore().collection('users').doc(user.uid).collection('localStorage').doc('data');
+
   useEffect(() => { if (user) load(); }, [user]);
 
   const load = async () => {
@@ -157,71 +155,92 @@ export default function RothIRAScreen() {
       const snap = await docRef().get();
       const data = snap.exists ? snap.data() : {};
       setDeposits(JSON.parse(data.ira_deposits || '[]'));
-      setCurrentBalance(data.ira_current_balance   || '');
-      setBeginningBalance(data.ira_beginning_balance || '');
-    } catch (err) {
-      Alert.alert('Load error', err.message);
-    } finally {
-      setLoading(false);
-    }
+      setCurrentBalance(data.ira_current_balance || '');
+    } catch (err) { Alert.alert('Load error', err.message); }
+    finally { setLoading(false); }
   };
 
   const flash = () => { setSaved(true); setTimeout(() => setSaved(false), 1500); };
 
-  const persist = async (deps, cb, bb) => {
+  const persist = async (deps, cb) => {
     try {
-      await docRef().set(
-        {
-          ira_deposits:          JSON.stringify(deps),
-          ira_current_balance:   cb,
-          ira_beginning_balance: bb,
-        },
-        { merge: true },
-      );
+      await docRef().set({ ira_deposits: JSON.stringify(deps), ira_current_balance: cb }, { merge: true });
       flash();
-    } catch (err) {
-      Alert.alert('Save error', err.message);
-    }
+    } catch (err) { Alert.alert('Save error', err.message); }
   };
 
-  const onBalanceBlur = () => persist(deposits, currentBalance, beginningBalance);
+  // ── Derived data ───────────────────────────────────────────────────────────
 
-  // ── Computed ────────────────────────────────────────────
-  const total     = deposits.reduce((s, d) => s + (d.amount || 0), 0);
-  const remaining = Math.max(0, LIMIT - total);
-  const contribPct = Math.min(100, (total / LIMIT) * 100);
-  const yearPct   = getYearPct();
-  const ahead     = contribPct >= yearPct;
-  const cb        = parseFloat(currentBalance)   || 0;
-  const bb        = parseFloat(beginningBalance) || 0;
-  const returns       = cb - total;
-  const sinceStart    = cb - bb;
-  const projFinish    = projFinishDate(total, deposits);
+  const currentYear = new Date().getFullYear();
+  const cb          = parseFloat(currentBalance) || 0;
 
-  const projYears  = Math.max(0, (parseInt(projTargetAge) || 65) - (parseInt(projAge) || 20));
-  const projBal    = cb > 0 ? cb : total;
-  const projRate_n = (parseFloat(projRate) || 7) / 100;
-  const projected  = projBal * Math.pow(1 + projRate_n, projYears);
-  const projGains  = projected - projBal;
+  // Year grouping
+  const depositsByYear = {};
+  deposits.forEach(d => {
+    const yr = getDepYear(d);
+    if (!depositsByYear[yr]) depositsByYear[yr] = [];
+    depositsByYear[yr].push(d);
+  });
+  const depositYears = Object.keys(depositsByYear).map(Number).sort();
+  const allYears     = [...new Set([...depositYears, currentYear])].sort().reverse();
 
-  // ── Log deposit ─────────────────────────────────────────
+  const getTotalForYear = (year) =>
+    (depositsByYear[year] || []).reduce((s, d) => s + (d.amount || 0), 0);
+
+  const maxedYears = depositYears.filter(y => getTotalForYear(y) >= getLimit(y));
+
+  // Lifetime
+  const lifetimeTotal = deposits.reduce((s, d) => s + (d.amount || 0), 0);
+  const returns       = cb > 0 ? cb - lifetimeTotal : null;
+
+  // This year
+  const thisYearTotal  = getTotalForYear(currentYear);
+  const thisYearLimit  = getLimit(currentYear);
+  const contribPct     = Math.min(100, (thisYearTotal / thisYearLimit) * 100);
+  const yearPct        = getYearPct();
+  const ahead          = contribPct >= yearPct;
+
+  // Projection
+  const projYears   = Math.max(0, (parseInt(projTargetAge) || 65) - (parseInt(projAge) || 20));
+  const projBal     = cb > 0 ? cb : lifetimeTotal;
+  const projRate_n  = (parseFloat(projRate) || 7) / 100;
+  const projected   = projBal > 0 ? projBal * Math.pow(1 + projRate_n, projYears) : 0;
+  const projGains   = projected - projBal;
+
+  // Live form preview
+  const yearPreview = (() => {
+    const amt = parseFloat(formAmt) || 0;
+    if (amt <= 0) return null;
+    const year     = formDate.getFullYear();
+    const yearTotal = getTotalForYear(year);
+    const limit    = getLimit(year);
+    const newTotal = yearTotal + amt;
+    return { year, yearTotal, newTotal, limit, over: newTotal > limit };
+  })();
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
+
   const logDeposit = () => {
     const amt = parseFloat(formAmt);
     if (isNaN(amt) || amt <= 0) return Alert.alert('Invalid amount', 'Enter a positive amount.');
 
+    const year      = formDate.getFullYear();
+    const yearTotal = getTotalForYear(year);
+    const limit     = getLimit(year);
+
     const doAdd = async () => {
-      const entry = { id: Date.now(), label: formLabel.trim() || 'Deposit', date: fmtDateKey(formDate), amount: amt };
+      const entry   = { id: Date.now(), label: formLabel.trim() || 'Contribution', date: fmtDateKey(formDate), amount: amt };
       const updated = [...deposits, entry];
       setDeposits(updated);
       setFormLabel('');
       setFormAmt('');
-      await persist(updated, currentBalance, beginningBalance);
+      await persist(updated, currentBalance);
     };
 
-    if (total + amt > LIMIT) {
+    if (yearTotal + amt > limit) {
       Alert.alert(
         'Over limit',
-        `This deposit would bring your total to ${fmt$(total + amt)}, over the $${LIMIT.toLocaleString()} limit. Add anyway?`,
+        `This would bring ${year} to ${fmt$(yearTotal + amt)}, over the ${fmt$(limit)} limit. Add anyway?`,
         [{ text: 'Cancel', style: 'cancel' }, { text: 'Add anyway', onPress: doAdd }],
       );
     } else {
@@ -229,41 +248,33 @@ export default function RothIRAScreen() {
     }
   };
 
-  // ── Delete deposit ──────────────────────────────────────
   const deleteDeposit = id => {
-    Alert.alert('Remove deposit?', '', [
+    Alert.alert('Remove contribution?', '', [
       { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove', style: 'destructive',
-        onPress: async () => {
-          const updated = deposits.filter(d => d.id !== id);
-          setDeposits(updated);
-          await persist(updated, currentBalance, beginningBalance);
-        },
-      },
+      { text: 'Remove', style: 'destructive', onPress: async () => {
+        const updated = deposits.filter(d => d.id !== id);
+        setDeposits(updated);
+        await persist(updated, currentBalance);
+      }},
     ]);
   };
 
-  // ── Date picker ─────────────────────────────────────────
   const onDateChange = (event, selected) => {
     if (Platform.OS === 'android') setPicker({ show: false });
     if (!selected || event.type === 'dismissed') return;
     setFormDate(selected);
   };
 
+  // ─────────────────────────────────────────────────────────────────────────
+
   if (loading) {
-    return (
-      <View style={[s.centered, { backgroundColor: c.bgBase }]}>
-        <ActivityIndicator color={c.green} size="large" />
-      </View>
-    );
+    return <View style={[s.centered, { backgroundColor: c.bgBase }]}><ActivityIndicator color={c.green} size="large" /></View>;
   }
 
   const sortedDeposits = [...deposits].sort((a, b) => new Date(b.date) - new Date(a.date));
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bgBase }}>
-
       {saved && (
         <View style={[s.savedBadge, { backgroundColor: c.greenGlow, borderColor: c.green }]}>
           <Text style={[s.savedText, { color: c.green, fontFamily: MONO }]}>✓ Saved</Text>
@@ -272,160 +283,163 @@ export default function RothIRAScreen() {
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
-        {/* ── Account Balance ──────────────────────────── */}
-        <SecHeader title="Account Balance" open={open.balance} onToggle={() => toggle('balance')} c={c} />
+        {/* ── Lifetime Dashboard ─────────────────────────────────── */}
+        <View style={s.metRow}>
+          <MetCard label="Lifetime Contributed" value={fmtBig(lifetimeTotal)} sub="all years"      color={c.green}  c={c} />
+          <MetCard label="Current Balance"      value={cb > 0 ? fmtBig(cb) : '—'}  sub="account value" color={c.blue}   c={c} />
+          <MetCard
+            label="Total Returns"
+            value={returns != null ? fmt$(returns, true) : '—'}
+            sub={returns != null ? (returns >= 0 ? 'investment gains' : 'loss vs deposits') : 'gains vs deposits'}
+            color={returns != null ? (returns >= 0 ? c.green : c.red) : undefined}
+            c={c}
+          />
+          <MetCard
+            label="Years Maxed"
+            value={String(maxedYears.length)}
+            sub={`of ${depositYears.length} year${depositYears.length !== 1 ? 's' : ''}`}
+            color={c.green}
+            c={c}
+          />
+          <MetCard label="Deposits"       value={String(deposits.length)} sub="all time"   c={c} />
+          <MetCard label="Projected at 65" value={projected > 0 ? fmtBig(projected) : '—'} sub="@ 7% avg return" color={c.purple} fontSize={16} c={c} />
+        </View>
+
+        {/* ── Current Balance ────────────────────────────────────── */}
+        <SecHeader title="Current Balance" open={open.balance} onToggle={() => toggle('balance')} c={c} />
         {open.balance && (
           <View style={[s.card, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
-            <View style={s.row}>
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <FLabel label="Current Balance ($)" c={c} />
-                <TextInput
-                  style={[s.balanceInput, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.blue, fontFamily: MONO }]}
-                  value={currentBalance}
-                  onChangeText={setCurrentBalance}
-                  onBlur={onBalanceBlur}
-                  keyboardType="decimal-pad"
-                  placeholder="0.00"
-                  placeholderTextColor={c.textMuted}
+            <FLabel label="Current Account Balance ($)" c={c} />
+            <TextInput
+              style={[s.balanceInput, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.blue, fontFamily: MONO }]}
+              value={currentBalance}
+              onChangeText={setCurrentBalance}
+              onBlur={() => persist(deposits, currentBalance)}
+              keyboardType="decimal-pad"
+              placeholder="0.00"
+              placeholderTextColor={c.textMuted}
+            />
+            {cb > 0 && lifetimeTotal > 0 ? (
+              <View style={s.returnsSplit}>
+                <RsBlock label="Total Deposited" value={fmt$(lifetimeTotal)} color={c.blue} c={c} />
+                <RsBlock
+                  label="Returns"
+                  value={fmt$(cb - lifetimeTotal, true)}
+                  sub={cb - lifetimeTotal >= 0 ? 'gains so far' : 'loss so far'}
+                  color={cb - lifetimeTotal >= 0 ? c.green : c.red}
+                  c={c}
                 />
               </View>
-              <View style={{ flex: 1, marginLeft: 8 }}>
-                <FLabel label="Beginning Balance ($)" c={c} />
-                <TextInput
-                  style={[s.balanceInput, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
-                  value={beginningBalance}
-                  onChangeText={setBeginningBalance}
-                  onBlur={onBalanceBlur}
-                  keyboardType="decimal-pad"
-                  placeholder="0.00"
-                  placeholderTextColor={c.textMuted}
-                />
+            ) : (
+              <View style={s.returnsSplit}>
+                <RsBlock label="Total Deposited" value={fmt$(lifetimeTotal)} color={c.blue} c={c} />
               </View>
-            </View>
-            <Text style={[s.note, { color: c.textMuted, fontFamily: MONO }]}>
-              Update current balance after checking your account. Beginning balance tracks growth since Jan 1.
+            )}
+            <Text style={[s.note, { color: c.textMuted, fontFamily: MONO, marginTop: 8 }]}>
+              Update after checking your brokerage account. Returns are calculated automatically.
             </Text>
           </View>
         )}
 
-        {/* ── Progress Hero ────────────────────────────── */}
-        <View style={[s.hero, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
-          <View style={s.heroTop}>
-            <Text style={[s.heroAmt, { color: c.green, fontFamily: MONO }]}>{fmt$(total)}</Text>
-            <Text style={[s.heroLimit, { color: c.textMuted, fontFamily: MONO }]}>deposited toward ${LIMIT.toLocaleString()} limit</Text>
-          </View>
-          <View style={[s.heroTrack, { backgroundColor: c.bgBase, borderColor: c.borderSubtle }]}>
-            <View style={[s.heroFill, { width: `${contribPct.toFixed(2)}%`, backgroundColor: c.green }]} />
-          </View>
-          <View style={s.heroBottom}>
-            <Text style={[s.heroPct,       { color: c.green,    fontFamily: MONO }]}>{contribPct.toFixed(1)}% complete</Text>
-            <Text style={[s.heroRemaining, { color: c.textMuted, fontFamily: MONO }]}>{fmt$(remaining)} remaining</Text>
-          </View>
-        </View>
-
-        {/* ── Metrics ─────────────────────────────────── */}
-        <View style={s.metRow}>
-          <MetCard label="Deposited (2026)" value={fmt$(total)}      sub="year to date"  color={c.green}       c={c} />
-          <MetCard label="Limit Remaining"  value={fmt$(remaining)}  sub="to hit limit"  color={c.blue}        c={c} />
-          <MetCard
-            label="On Track"
-            value={total >= LIMIT ? 'Maxed' : ahead ? 'Ahead' : 'Behind'}
-            sub={total >= LIMIT ? 'limit reached' : ahead ? `${(contribPct - yearPct).toFixed(1)}% ahead` : `${(yearPct - contribPct).toFixed(1)}% behind`}
-            color={total >= LIMIT ? c.green : ahead ? c.green : c.amber}
-            c={c}
-          />
-          <MetCard
-            label="Proj. Finish"
-            value={projFinish || '—'}
-            sub={projFinish === 'Done' ? 'limit reached' : projFinish ? 'at current pace' : 'log more deposits'}
-            color={c.textPrimary}
-            fontSize={projFinish ? 13 : 18}
-            c={c}
-          />
-        </View>
-
-        {/* ── Balance & Returns ────────────────────────── */}
-        <SecHeader title="Balance & Returns" open={open.returns} onToggle={() => toggle('returns')} c={c} />
-        {open.returns && (
-          <View style={[s.card, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
-            <View style={s.returnsSplit}>
-              <RetBlock label="Deposited Total"    value={fmt$(total)}                   sub="sum of all deposits"              color={c.green}                                 c={c} />
-              <RetBlock label="Current Balance"    value={fmt$(cb)}                      sub="as entered above"                 color={c.blue}                                  c={c} />
-              <RetBlock label="Est. Returns"       value={fmt$(returns, true)}           sub={returns >= 0 ? 'investment gains' : 'loss vs deposits'} color={returns >= 0 ? c.green : c.red} c={c} />
-              <RetBlock label="Return Since Jan 1" value={fmt$(sinceStart, true)}        sub={sinceStart >= 0 ? 'growth since Jan 1' : 'decline since Jan 1'} color={sinceStart >= 0 ? c.green : c.red} c={c} />
+        {/* ── Year-by-Year Progress ──────────────────────────────── */}
+        <SecHeader title="Year-by-Year Progress" open={open.years} onToggle={() => toggle('years')} c={c} />
+        {open.years && (
+          allYears.length === 0 ? (
+            <View style={[s.empty, { borderColor: c.borderSubtle }]}>
+              <Text style={[s.emptyTxt, { color: c.textMuted, fontFamily: MONO }]}>No contributions yet. Log your first contribution below.</Text>
             </View>
-            <Text style={[s.note, { color: c.textMuted, fontFamily: MONO, marginTop: 12 }]}>
-              Returns = current balance − deposits. Set beginning balance to track growth since Jan 1.
-            </Text>
-          </View>
+          ) : (
+            allYears.map(year => {
+              const yearTotal    = getTotalForYear(year);
+              const limit        = getLimit(year);
+              const pct          = Math.min(100, (yearTotal / limit) * 100);
+              const maxed        = yearTotal >= limit;
+              const isCurrent    = year === currentYear;
+              const yearDeps     = depositsByYear[year] || [];
+              const behind       = isCurrent && !maxed && pct < yearPct;
+              const barColor     = maxed ? c.green : behind ? c.amber : c.green;
+
+              return (
+                <View key={year} style={[s.yearCard, { backgroundColor: c.bgCard, borderColor: maxed ? c.green : c.borderSubtle }]}>
+                  {maxed && (
+                    <View style={[s.maxedBadge, { backgroundColor: c.greenGlow, borderColor: c.green }]}>
+                      <Text style={[s.maxedBadgeTxt, { color: c.green, fontFamily: MONO }]}>MAXED</Text>
+                    </View>
+                  )}
+                  <View style={s.ycTop}>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6 }}>
+                      <Text style={[s.ycYear, { color: c.textPrimary, fontFamily: MONO }]}>{year}</Text>
+                      {isCurrent && <Text style={[s.ycCurrent, { color: c.textMuted, fontFamily: MONO }]}>(current)</Text>}
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
+                      <Text style={[s.ycContrib, { color: c.green, fontFamily: MONO }]}>{fmt$(yearTotal)}</Text>
+                      <Text style={[s.ycLimit, { color: c.textMuted, fontFamily: MONO }]}>/ {fmt$(limit)}</Text>
+                    </View>
+                  </View>
+                  <View style={[s.ycTrack, { backgroundColor: c.bgBase, borderColor: c.borderSubtle }]}>
+                    <View style={[s.ycFill, { width: `${pct.toFixed(2)}%`, backgroundColor: barColor }]} />
+                  </View>
+                  <View style={s.ycBottom}>
+                    <Text style={[s.ycPct, { color: c.textMuted, fontFamily: MONO }]}>{pct.toFixed(1)}% of limit</Text>
+                    <Text style={[s.ycCount, { color: c.textMuted, fontFamily: MONO }]}>
+                      {yearDeps.length} contribution{yearDeps.length !== 1 ? 's' : ''}
+                    </Text>
+                    {isCurrent && !maxed && (
+                      <Text style={[s.ycPace, { color: ahead ? c.green : c.amber, fontFamily: MONO }]}>
+                        {ahead ? 'Ahead of pace' : 'Behind pace'}
+                      </Text>
+                    )}
+                    {maxed && (
+                      <View style={[s.pill, { backgroundColor: c.greenGlow, borderColor: c.green }]}>
+                        <Text style={[s.pillTxt, { color: c.green, fontFamily: MONO }]}>Maxed Out</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              );
+            })
+          )
         )}
 
-        {/* ── Year Pace ────────────────────────────────── */}
-        <SecHeader title="Year Pace" open={open.pace} onToggle={() => toggle('pace')} c={c} />
-        {open.pace && (
-          <View style={[s.card, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
-            <PaceBar label="Contributed"  pct={contribPct} color={c.green} c={c} />
-            <PaceBar label="Year elapsed" pct={yearPct}    color={c.blue}  c={c} />
-            <Text style={[s.note, { color: c.textMuted, fontFamily: MONO }]}>
-              {ahead ? 'You are ahead of a straight-line pace to max by Dec 31.' : 'You are behind a straight-line pace to max by Dec 31.'}
-            </Text>
-          </View>
+        {/* ── Maxout History ─────────────────────────────────────── */}
+        <SecHeader title="Maxout History" open={open.maxout} onToggle={() => toggle('maxout')} c={c} />
+        {open.maxout && (
+          maxedYears.length === 0 ? (
+            <View style={[s.empty, { borderColor: c.borderSubtle }]}>
+              <Text style={[s.emptyTxt, { color: c.textMuted, fontFamily: MONO }]}>No years maxed out yet.</Text>
+            </View>
+          ) : (
+            <View style={s.maxoutRow}>
+              {[...maxedYears].sort().reverse().map(year => (
+                <View key={year} style={[s.maxoutBadge, { backgroundColor: c.greenGlow, borderColor: c.green }]}>
+                  <Text style={[s.moBadgeYear, { color: c.green,       fontFamily: MONO }]}>{year}</Text>
+                  <Text style={[s.moBadgeAmt,  { color: c.textPrimary, fontFamily: MONO }]}>{fmt$(getLimit(year))}</Text>
+                  <Text style={[s.moBadgeCheck,{ color: c.green }]}>✓</Text>
+                </View>
+              ))}
+            </View>
+          )
         )}
 
-        {/* ── Long-Term Projection ─────────────────────── */}
-        <SecHeader title="Long-Term Projection" open={open.projection} onToggle={() => toggle('projection')} c={c} />
-        {open.projection && (
+        {/* ── Log a Contribution ─────────────────────────────────── */}
+        <SecHeader title="Log a Contribution" open={open.log} onToggle={() => toggle('log')} c={c} />
+        {open.log && (
           <View style={[s.card, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
-            <View style={s.row}>
-              <View style={{ flex: 1, marginRight: 6 }}>
-                <FLabel label="Return Rate (%)" c={c} />
-                <TextInput style={[s.projInput, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
-                  value={projRate} onChangeText={setProjRate} keyboardType="decimal-pad" placeholder="7" placeholderTextColor={c.textMuted} />
-              </View>
-              <View style={{ flex: 1, marginHorizontal: 6 }}>
-                <FLabel label="Current Age" c={c} />
-                <TextInput style={[s.projInput, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
-                  value={projAge} onChangeText={setProjAge} keyboardType="number-pad" placeholder="20" placeholderTextColor={c.textMuted} />
-              </View>
-              <View style={{ flex: 1, marginLeft: 6 }}>
-                <FLabel label="Target Age" c={c} />
-                <TextInput style={[s.projInput, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
-                  value={projTargetAge} onChangeText={setProjTargetAge} keyboardType="number-pad" placeholder="65" placeholderTextColor={c.textMuted} />
-              </View>
-            </View>
-
-            <View style={s.metRow}>
-              <MetCard label="Years to Grow"     value={String(projYears)}    color={c.blue}        c={c} />
-              <MetCard label="Projected Balance" value={fmtBig(projected)}    sub="at target age"   color={c.green}       c={c} />
-              <MetCard label="Starting Balance"  value={fmtBig(projBal)}      color={c.textPrimary} c={c} />
-              <MetCard label="Est. Returns"      value={fmtBig(projGains)}    sub="investment gains" color={c.purple}     c={c} />
-            </View>
-
-            <Text style={[s.note, { color: c.textMuted, fontFamily: MONO }]}>
-              Starting from {cb > 0 ? 'current balance' : 'deposited total'} of {fmtBig(projBal)}, at {projRate || 7}% annual return over {projYears} years → {fmtBig(projected)} at age {projTargetAge}. Simplified estimate — actual returns will vary.
-            </Text>
-          </View>
-        )}
-
-        {/* ── Log a Deposit ────────────────────────────── */}
-        <SecHeader title="Log a Deposit" open={open.entry} onToggle={() => toggle('entry')} c={c} />
-        {open.entry && (
-          <View style={[s.card, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
-            <FLabel label="Label" c={c} />
+            <FLabel label="Label (optional)" c={c} />
             <TextInput
               style={[s.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
-              placeholder="e.g. May contribution"
+              placeholder="e.g. Summer contribution"
               placeholderTextColor={c.textMuted}
               value={formLabel}
               onChangeText={setFormLabel}
             />
 
-            <View style={s.row}>
+            <View style={s.formRow}>
               <View style={{ flex: 1, marginRight: 8 }}>
                 <FLabel label="Date" c={c} />
                 <TouchableOpacity style={[s.dtBtn, { borderColor: c.borderSubtle, backgroundColor: c.bgBase }]} onPress={() => setPicker({ show: true })}>
                   <Text style={[s.dtText, { color: c.textPrimary, fontFamily: MONO }]}>
-                    {formDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    {formDate.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -442,8 +456,15 @@ export default function RothIRAScreen() {
               </View>
             </View>
 
+            {/* Live year preview */}
+            {yearPreview && (
+              <Text style={[s.yearPreview, { color: yearPreview.over ? c.red : c.textMuted, fontFamily: MONO }]}>
+                {yearPreview.year} contribution: {fmt$(yearPreview.yearTotal)} → {fmt$(yearPreview.newTotal)} / {fmt$(yearPreview.limit)} limit
+              </Text>
+            )}
+
             <TouchableOpacity style={[s.addBtn, { backgroundColor: c.greenGlow, borderColor: c.green }]} onPress={logDeposit}>
-              <Text style={[s.addBtnTxt, { color: c.green, fontFamily: MONO }]}>+ Add Deposit</Text>
+              <Text style={[s.addBtnTxt, { color: c.green, fontFamily: MONO }]}>+ Log Contribution</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -465,29 +486,92 @@ export default function RothIRAScreen() {
           </Modal>
         )}
 
-        {/* ── Deposit History ──────────────────────────── */}
-        <SecHeader title={`Deposit History (${deposits.length})`} open={open.history} onToggle={() => toggle('history')} c={c} />
-        {open.history && (
+        {/* ── This Year's Pace ───────────────────────────────────── */}
+        <SecHeader title="This Year's Pace" open={open.pace} onToggle={() => toggle('pace')} c={c} />
+        {open.pace && (
+          <View style={[s.card, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+            <PaceBar label="Contributed"  pct={contribPct} color={c.green} c={c} />
+            <PaceBar label="Year elapsed" pct={yearPct}    color={c.blue}  c={c} />
+            <Text style={[s.note, { color: c.textMuted, fontFamily: MONO }]}>
+              {thisYearTotal >= thisYearLimit
+                ? `${currentYear} is maxed out at ${fmt$(thisYearLimit)}.`
+                : ahead
+                ? `You are ahead of pace to max ${currentYear} by Dec 31. ${fmt$(thisYearLimit - thisYearTotal)} remaining.`
+                : `You are behind pace to max ${currentYear} by Dec 31. ${fmt$(thisYearLimit - thisYearTotal)} remaining.`}
+            </Text>
+          </View>
+        )}
+
+        {/* ── All Contributions ──────────────────────────────────── */}
+        <SecHeader title={`All Contributions (${deposits.length})`} open={open.deposits} onToggle={() => toggle('deposits')} c={c} />
+        {open.deposits && (
           sortedDeposits.length === 0 ? (
             <View style={[s.empty, { borderColor: c.borderSubtle }]}>
-              <Text style={[s.emptyTxt, { color: c.textMuted, fontFamily: MONO }]}>No deposits logged yet.</Text>
+              <Text style={[s.emptyTxt, { color: c.textMuted, fontFamily: MONO }]}>No contributions logged yet.</Text>
             </View>
           ) : (
-            sortedDeposits.map(dep => (
-              <View key={dep.id} style={[s.depItem, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[s.depLabel, { color: c.textPrimary, fontFamily: MONO }]}>{dep.label || 'Deposit'}</Text>
-                  <Text style={[s.depDate,  { color: c.textMuted,    fontFamily: MONO }]}>{fmtDisplay(dep.date)}</Text>
+            sortedDeposits.map(dep => {
+              const yr = getDepYear(dep);
+              return (
+                <View key={dep.id} style={[s.depItem, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.depLabel, { color: c.textPrimary, fontFamily: MONO }]}>{dep.label || 'Contribution'}</Text>
+                    <Text style={[s.depDate,  { color: c.textMuted,    fontFamily: MONO }]}>{fmtDisplay(dep.date)}</Text>
+                  </View>
+                  <View style={s.depRight}>
+                    <View style={[s.yearPill, { backgroundColor: c.blueGlow, borderColor: c.blue }]}>
+                      <Text style={[s.yearPillTxt, { color: c.blue, fontFamily: MONO }]}>{yr}</Text>
+                    </View>
+                    <Text style={[s.depAmt, { color: c.green, fontFamily: MONO }]}>{fmt$(dep.amount)}</Text>
+                    <TouchableOpacity onPress={() => deleteDeposit(dep.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Text style={{ color: c.textMuted, fontSize: 14 }}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-                <View style={s.depRight}>
-                  <Text style={[s.depAmt, { color: c.green, fontFamily: MONO }]}>{fmt$(dep.amount)}</Text>
-                  <TouchableOpacity onPress={() => deleteDeposit(dep.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <Text style={{ color: c.textMuted, fontSize: 14 }}>✕</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))
+              );
+            })
           )
+        )}
+
+        {/* ── Growth Projection ──────────────────────────────────── */}
+        <SecHeader title="Growth Projection" open={open.projection} onToggle={() => toggle('projection')} c={c} />
+        {open.projection && (
+          <View style={[s.card, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+            <View style={s.projInputsRow}>
+              {[
+                { label: 'Annual Return %', value: projRate,      setter: setProjRate,      kbType: 'decimal-pad' },
+                { label: 'Your Age',        value: projAge,       setter: setProjAge,       kbType: 'number-pad'  },
+                { label: 'Target Age',      value: projTargetAge, setter: setProjTargetAge, kbType: 'number-pad'  },
+              ].map(({ label, value, setter, kbType }) => (
+                <View key={label} style={{ flex: 1 }}>
+                  <FLabel label={label} c={c} />
+                  <TextInput
+                    style={[s.projInput, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
+                    value={value} onChangeText={setter}
+                    keyboardType={kbType} placeholder="—" placeholderTextColor={c.textMuted}
+                  />
+                </View>
+              ))}
+            </View>
+
+            {projected > 0 ? (
+              <>
+                <Text style={[s.projNumber, { color: c.green, fontFamily: MONO }]}>{fmtBig(projected)}</Text>
+                <Text style={[s.note, { color: c.textMuted, fontFamily: MONO }]}>projected balance</Text>
+                <View style={s.returnsSplit}>
+                  <RsBlock label="Starting Balance"   value={fmtBig(projBal)}   color={c.blue}  c={c} />
+                  <RsBlock label="Projected Returns"  value={fmtBig(projGains)} sub={`over ${projYears} years`} color={c.green} c={c} />
+                </View>
+                <Text style={[s.note, { color: c.textMuted, fontFamily: MONO, marginTop: 8 }]}>
+                  Starting from {fmtBig(projBal)} at {projRate || 7}% annual return over {projYears} years. Simplified estimate — actual returns will vary.
+                </Text>
+              </>
+            ) : (
+              <Text style={[s.note, { color: c.textMuted, fontFamily: MONO, marginTop: 8 }]}>
+                Log contributions or set a current balance to see your projection.
+              </Text>
+            )}
+          </View>
         )}
 
       </ScrollView>
@@ -495,62 +579,66 @@ export default function RothIRAScreen() {
   );
 }
 
-// ─── RetBlock (used only in returns section) ──────────────────────────────────
-
-function RetBlock({ label, value, sub, color, c }) {
-  return (
-    <View style={[rb.block, { backgroundColor: c.bgBase }]}>
-      <Text style={[rb.label, { color: c.textMuted, fontFamily: MONO }]}>{label.toUpperCase()}</Text>
-      <Text style={[rb.value, { color, fontFamily: MONO }]}>{value}</Text>
-      {!!sub && <Text style={[rb.sub, { color: c.textMuted, fontFamily: MONO }]}>{sub}</Text>}
-    </View>
-  );
-}
-const rb = StyleSheet.create({
-  block: { flex: 1, minWidth: '45%', borderRadius: 8, padding: 12, margin: 3 },
-  label: { fontSize: 9, fontWeight: '600', letterSpacing: 0.8, marginBottom: 4 },
-  value: { fontSize: 20, fontWeight: '600', letterSpacing: -0.3 },
-  sub:   { fontSize: 10, marginTop: 3 },
-});
-
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
   centered:  { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scroll:    { padding: 14, paddingBottom: 60 },
-  metRow:    { flexDirection: 'row', flexWrap: 'wrap', marginVertical: 4 },
-  row:       { flexDirection: 'row', alignItems: 'flex-start' },
-
-  card:      { borderWidth: 1, borderRadius: 10, padding: 14, marginBottom: 6 },
+  metRow:    { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 4 },
+  formRow:   { flexDirection: 'row', alignItems: 'flex-start' },
   note:      { fontSize: 10, lineHeight: 16 },
 
-  balanceInput: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8, fontSize: 15, fontWeight: '600' },
+  card:      { borderWidth: 1, borderRadius: 10, padding: 14, marginBottom: 6 },
 
-  hero:         { borderWidth: 1, borderRadius: 12, padding: 18, marginBottom: 10, marginTop: 6 },
-  heroTop:      { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 },
-  heroAmt:      { fontSize: 28, fontWeight: '600', letterSpacing: -0.5 },
-  heroLimit:    { fontSize: 12 },
-  heroTrack:    { height: 10, borderRadius: 5, borderWidth: 1, overflow: 'hidden', marginBottom: 8 },
-  heroFill:     { height: '100%', borderRadius: 5 },
-  heroBottom:   { flexDirection: 'row', justifyContent: 'space-between' },
-  heroPct:      { fontSize: 12, fontWeight: '600' },
-  heroRemaining:{ fontSize: 12 },
+  balanceInput: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8, fontSize: 15, fontWeight: '600', marginBottom: 10 },
+  returnsSplit: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 4 },
 
-  returnsSplit: { flexDirection: 'row', flexWrap: 'wrap' },
+  // Year cards
+  yearCard:    { borderWidth: 1, borderRadius: 12, padding: 16, marginBottom: 10, position: 'relative' },
+  maxedBadge:  { position: 'absolute', top: 10, right: 12, borderWidth: 1, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
+  maxedBadgeTxt:{ fontSize: 9, fontWeight: '700', letterSpacing: 0.8 },
+  ycTop:       { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 },
+  ycYear:      { fontSize: 18, fontWeight: '700' },
+  ycCurrent:   { fontSize: 11 },
+  ycContrib:   { fontSize: 15, fontWeight: '700' },
+  ycLimit:     { fontSize: 13 },
+  ycTrack:     { height: 8, borderRadius: 4, borderWidth: 1, overflow: 'hidden', marginBottom: 6 },
+  ycFill:      { height: '100%', borderRadius: 4 },
+  ycBottom:    { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  ycPct:       { fontSize: 11, fontWeight: '600' },
+  ycCount:     { fontSize: 10 },
+  ycPace:      { fontSize: 10, fontWeight: '600' },
+  pill:        { borderWidth: 1, borderRadius: 20, paddingHorizontal: 8, paddingVertical: 2 },
+  pillTxt:     { fontSize: 10, fontWeight: '600', letterSpacing: 0.4 },
 
-  projInput: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 7, fontSize: 13, fontWeight: '600' },
+  // Maxout history
+  maxoutRow:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  maxoutBadge: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10, alignItems: 'center', minWidth: 70 },
+  moBadgeYear: { fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
+  moBadgeAmt:  { fontSize: 12, fontWeight: '600', marginTop: 2 },
+  moBadgeCheck:{ fontSize: 16, marginTop: 2 },
 
-  input:     { borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 7, fontSize: 12 },
-  dtBtn:     { borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8 },
-  dtText:    { fontSize: 12 },
-  addBtn:    { borderWidth: 1, borderRadius: 20, paddingVertical: 9, paddingHorizontal: 20, alignSelf: 'flex-end', marginTop: 12 },
-  addBtnTxt: { fontSize: 12, fontWeight: '600', letterSpacing: 0.5 },
+  // Log form
+  input:      { borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 7, fontSize: 12, marginBottom: 2 },
+  dtBtn:      { borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8 },
+  dtText:     { fontSize: 12 },
+  yearPreview:{ fontSize: 11, marginBottom: 8, marginTop: 4 },
+  addBtn:     { borderWidth: 1, borderRadius: 20, paddingVertical: 9, paddingHorizontal: 20, alignSelf: 'flex-end', marginTop: 12 },
+  addBtnTxt:  { fontSize: 12, fontWeight: '600', letterSpacing: 0.5 },
 
-  depItem:   { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 5, gap: 10 },
-  depLabel:  { fontSize: 12, fontWeight: '500' },
-  depDate:   { fontSize: 11, marginTop: 1 },
-  depRight:  { flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 0 },
-  depAmt:    { fontSize: 13, fontWeight: '600' },
+  // Deposit list
+  depItem:    { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 5, gap: 10 },
+  depLabel:   { fontSize: 12, fontWeight: '500' },
+  depDate:    { fontSize: 11, marginTop: 1 },
+  depRight:   { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
+  depAmt:     { fontSize: 13, fontWeight: '600' },
+  yearPill:   { borderWidth: 1, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 1 },
+  yearPillTxt:{ fontSize: 10, fontWeight: '600' },
+
+  // Projection
+  projInputsRow:{ flexDirection: 'row', gap: 8 },
+  projInput:    { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 7, fontSize: 13, fontWeight: '600' },
+  projNumber:   { fontSize: 32, fontWeight: '700', letterSpacing: -0.5, marginTop: 12, marginBottom: 2 },
 
   empty:     { borderWidth: 1, borderStyle: 'dashed', borderRadius: 8, padding: 28, alignItems: 'center', marginBottom: 6 },
   emptyTxt:  { fontSize: 12 },
