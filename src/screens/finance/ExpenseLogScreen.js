@@ -7,13 +7,14 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
+import { BlurView } from 'expo-blur';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useHaptics } from '../../hooks/useHaptics';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
+const MONO = 'Inter_500Medium';
 
 const CATEGORIES = ['Equipment', 'Golf', 'Gas', 'Food', 'Social', 'Subscriptions', 'Emergency', 'Other'];
 
@@ -198,7 +199,7 @@ function DonutChart({ catSorted, c }) {
 // ─── Add Subscription Modal ───────────────────────────────────────────────────
 
 const AddSubModal = React.memo(function AddSubModal({ visible, onClose, onSave }) {
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
   const c = theme.colors;
 
   const [name,    setName]    = useState('');
@@ -223,7 +224,7 @@ const AddSubModal = React.memo(function AddSubModal({ visible, onClose, onSave }
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={sm.overlay}>
-        <View style={[sm.sheet, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+        <BlurView intensity={60} tint={isDark?'dark':'light'} style={[sm.sheet, { borderColor: c.borderSubtle }]}>
           <View style={[sm.header, { borderBottomColor: c.borderSubtle }]}>
             <Text style={[sm.title, { color: c.textPrimary, fontFamily: MONO }]}>Add Subscription</Text>
             <TouchableOpacity onPress={onClose} style={[sm.closeBtn, { backgroundColor: c.bgBase, borderColor: c.borderSubtle }]}>
@@ -291,7 +292,7 @@ const AddSubModal = React.memo(function AddSubModal({ visible, onClose, onSave }
               </TouchableOpacity>
             </View>
           </ScrollView>
-        </View>
+        </BlurView>
       </View>
     </Modal>
   );

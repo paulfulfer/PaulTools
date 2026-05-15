@@ -13,7 +13,7 @@ import { useHaptics } from '../../hooks/useHaptics';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
+const MONO = 'Inter_500Medium';
 
 const TYPE_ORDER  = ['driver','wood','hybrid','iron','wedge','putter','ball','training','other'];
 const TYPE_LABELS = { driver:'Driver', wood:'Wood', hybrid:'Hybrid', iron:'Iron', wedge:'Wedge', putter:'Putter', ball:'Ball', training:'Training', other:'Other' };

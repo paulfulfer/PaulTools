@@ -11,7 +11,7 @@ import { useAuth } from '../../context/AuthContext';
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
-const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
+const MONO = 'Inter_500Medium';
 
 const SECTIONS = [
   { key:'driver',   label:'Drivers',                        icon:'🏌️', singular:'Driver'       },

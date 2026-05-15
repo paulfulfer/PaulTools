@@ -13,7 +13,7 @@ import { useHaptics } from '../../hooks/useHaptics';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
+const MONO = 'Inter_500Medium';
 
 const DEFAULT_JOBS = [
   { id: 'j1', title: 'SESP',          wage: 10.25, unit: 'hrs' },

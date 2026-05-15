@@ -12,7 +12,7 @@ import { useHaptics } from '../../hooks/useHaptics';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
+const MONO = 'Inter_500Medium';
 
 const YEAR_LIMITS = {
   2019: 6000, 2020: 6000, 2021: 6000, 2022: 6000,

@@ -12,7 +12,7 @@ import { useAuth } from '../../context/AuthContext';
 
 // ─── Constants & helpers ──────────────────────────────────────────────────────
 
-const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
+const MONO = 'Inter_500Medium';
 
 const COLORS       = ['#2a7de1','#0e9e70','#c27d08','#d03030','#6c5bbf','#e06030','#1899a8','#888888'];
 const ASSIGN_TYPES = ['Homework','Quiz','Exam','Project','Reading','Lab','Discussion','Other'];

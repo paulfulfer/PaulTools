@@ -25,12 +25,12 @@ export default function ToolCard({ title, description, icon, accent, onPress }) 
       <View style={[styles.iconWrap, { backgroundColor: accentGlow }]}>
         <Text style={styles.iconText}>{icon}</Text>
       </View>
-      <Text style={[styles.title, { color: theme.colors.textPrimary }]}>{title}</Text>
-      <Text style={[styles.description, { color: theme.colors.textSecondary }]}>{description}</Text>
+      <Text style={[styles.title, { color: theme.colors.textPrimary, fontFamily: 'Inter_700Bold' }]}>{title}</Text>
+      <Text style={[styles.description, { color: theme.colors.textSecondary, fontFamily: 'Inter_400Regular' }]}>{description}</Text>
       <View style={[styles.footer, { borderTopColor: theme.colors.borderSubtle }]}>
         <View style={styles.statusRow}>
           <View style={[styles.dot, { backgroundColor: theme.colors.green }]} />
-          <Text style={[styles.statusText, { color: theme.colors.textMuted }]}>ACTIVE</Text>
+          <Text style={[styles.statusText, { color: theme.colors.textMuted, fontFamily: 'Inter_600SemiBold' }]}>ACTIVE</Text>
         </View>
         <Text style={[styles.arrow, { color: theme.colors.textMuted }]}>›</Text>
       </View>

@@ -7,13 +7,14 @@ import {
 import DateTimePicker from '@react-native-community/datetimepicker';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
+import { BlurView } from 'expo-blur';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useHaptics } from '../../hooks/useHaptics';
 
 // ─── Constants & helpers ──────────────────────────────────────────────────────
 
-const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
+const MONO = 'Inter_500Medium';
 
 function scoreCol(score, par, c) {
   if (!score || !par) return c.amber;
@@ -175,7 +176,7 @@ const EMPTY_FORM = {
 };
 
 export default function RoundTrackerScreen() {
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
   const { user }  = useAuth();
   const { triggerHaptic } = useHaptics();
   const c = theme.colors;
@@ -495,7 +496,8 @@ export default function RoundTrackerScreen() {
       <Modal visible={modalMode !== null} animationType="slide" transparent onRequestClose={()=>setModalMode(null)}>
           <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'padding'} style={{flex:1}}>
           <View style={s.modalOverlay}>
-            <View style={[s.modalSheet, { backgroundColor:c.bgCard, borderColor:c.borderSubtle }]}>
+            <View style={[s.modalSheet, { borderColor:c.borderSubtle }]}>
+              <BlurView intensity={60} tint={isDark?'dark':'light'} style={StyleSheet.absoluteFill} />
               {/* Header */}
               <View style={[s.modalHeader, { borderBottomColor:c.borderSubtle, backgroundColor:c.bgCard }]}>
                 <Text style={[s.modalTitle, { color:c.textPrimary, fontFamily:MONO }]} numberOfLines={1}>{modalTitle}</Text>

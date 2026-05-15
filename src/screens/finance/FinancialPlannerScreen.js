@@ -5,11 +5,12 @@ import {
 } from 'react-native';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
+import { BlurView } from 'expo-blur';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useHaptics } from '../../hooks/useHaptics';
 
-const MONO     = Platform.select({ ios: 'Menlo', android: 'monospace' });
+const MONO = 'Inter_500Medium';
 const PA_RATE  = 0.0307;
 const VA_RATE  = 0.0575;
 
@@ -111,7 +112,7 @@ const DEF_REPAYMENTS = [
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function FinancialPlannerScreen() {
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
   const { user }  = useAuth();
   const { triggerHaptic } = useHaptics();
   const c = theme.colors;
@@ -675,7 +676,7 @@ export default function FinancialPlannerScreen() {
       <Modal visible={modalVis} transparent animationType="fade" onRequestClose={() => setModalVis(false)}>
         <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setModalVis(false)}>
           <TouchableOpacity activeOpacity={1}>
-            <View style={[s.modalBox, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+            <BlurView intensity={60} tint={isDark?'dark':'light'} style={[s.modalBox, { borderColor: c.borderSubtle }]}>
               <Text style={[s.modalTitle, { color: c.textPrimary, fontFamily: MONO }]}>
                 {modalType === 'goal' ? 'Add Goal' : 'Add Repayment'}
               </Text>
@@ -718,7 +719,7 @@ export default function FinancialPlannerScreen() {
                   <Text style={[s.modalBtnTxt, { color: c.green, fontFamily: MONO }]}>Add</Text>
                 </TouchableOpacity>
               </View>
-            </View>
+            </BlurView>
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>

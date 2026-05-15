@@ -7,13 +7,14 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
+import { BlurView } from 'expo-blur';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useHaptics } from '../../hooks/useHaptics';
 
 // ─── Constants & helpers ──────────────────────────────────────────────────────
 
-const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
+const MONO = 'Inter_500Medium';
 
 const TAGS = ['mentor','peer','professor','industry','recruiter','other'];
 
@@ -69,7 +70,7 @@ function FLabel({ label, c }) {
 // React.memo + internal useTheme so keystrokes never cause parent re-renders
 
 const ContactFormModal = React.memo(function ContactFormModal({ visible, initialValues, onSave, onDelete, onClose }) {
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
   const { triggerHaptic } = useHaptics();
   const c = theme.colors;
 
@@ -140,7 +141,7 @@ const ContactFormModal = React.memo(function ContactFormModal({ visible, initial
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={fm.overlay}>
-        <View style={[fm.sheet, { backgroundColor:c.bgCard, borderColor:c.borderSubtle }]}>
+        <BlurView intensity={60} tint={isDark?'dark':'light'} style={[fm.sheet, { borderColor:c.borderSubtle }]}>
           <View style={[fm.header, { borderBottomColor:c.borderSubtle }]}>
             <Text style={[fm.title, { color:c.textPrimary, fontFamily:MONO }]}>{isEdit ? 'Edit Contact' : 'Add Contact'}</Text>
             <TouchableOpacity style={[fm.closeBtn, { backgroundColor:c.bgBase, borderColor:c.borderSubtle }]} onPress={onClose}>
@@ -268,7 +269,7 @@ const ContactFormModal = React.memo(function ContactFormModal({ visible, initial
             </View>
 
           </ScrollView>
-        </View>
+        </BlurView>
       </View>
     </Modal>
   );
@@ -299,7 +300,7 @@ const fm = StyleSheet.create({
 // ─── Contact Detail Modal ─────────────────────────────────────────────────────
 
 const ContactDetailModal = React.memo(function ContactDetailModal({ visible, contact, onEdit, onMarkContacted, onClose }) {
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
   const c = theme.colors;
 
   if (!contact) return null;
@@ -311,7 +312,7 @@ const ContactDetailModal = React.memo(function ContactDetailModal({ visible, con
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={dm.overlay}>
-        <View style={[dm.sheet, { backgroundColor:c.bgCard, borderColor:c.borderSubtle }]}>
+        <BlurView intensity={60} tint={isDark?'dark':'light'} style={[dm.sheet, { borderColor:c.borderSubtle }]}>
           <View style={[dm.header, { borderBottomColor:c.borderSubtle }]}>
             <Text style={[dm.title, { color:c.textPrimary, fontFamily:MONO }]} numberOfLines={1}>{contact.name}</Text>
             <TouchableOpacity style={[dm.closeBtn, { backgroundColor:c.bgBase, borderColor:c.borderSubtle }]} onPress={onClose}>
@@ -385,7 +386,7 @@ const ContactDetailModal = React.memo(function ContactDetailModal({ visible, con
             </View>
 
           </ScrollView>
-        </View>
+        </BlurView>
       </View>
     </Modal>
   );

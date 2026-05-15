@@ -7,7 +7,7 @@ import { useTheme }   from '../../context/ThemeContext';
 import { useAuth }    from '../../context/AuthContext';
 import { useHaptics } from '../../context/HapticsContext';
 
-const MONO        = Platform.select({ ios: 'Menlo', android: 'monospace' });
+const MONO = 'Inter_500Medium';
 const APP_VERSION = '1.0.0';
 const WEB_URL     = 'paulfulfer.github.io/my-tools';
 

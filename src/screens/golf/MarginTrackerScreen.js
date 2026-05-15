@@ -12,7 +12,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useHaptics } from '../../hooks/useHaptics';
 
-const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
+const MONO = 'Inter_500Medium';
 const EQUIP_TYPES = ['driver', 'wood', 'hybrid', 'iron', 'wedge'];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

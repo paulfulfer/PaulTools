@@ -1,5 +1,13 @@
+export const fonts = {
+  regular:  'Inter_400Regular',
+  medium:   'Inter_500Medium',
+  semibold: 'Inter_600SemiBold',
+  bold:     'Inter_700Bold',
+};
+
 export const lightTheme = {
   dark: false,
+  fonts,
   colors: {
     bgBase:        '#f0f2f5',
     bgCard:        'rgba(255,255,255,0.65)',
@@ -30,6 +38,7 @@ export const lightTheme = {
 
 export const darkTheme = {
   dark: true,
+  fonts,
   colors: {
     bgBase:        '#0d1117',
     bgCard:        'rgba(22,27,34,0.72)',

@@ -1,9 +1,10 @@
 import React from 'react';
-import { View, ActivityIndicator, TouchableOpacity, Text } from 'react-native';
+import { View, ActivityIndicator, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 
 import { useAuth }    from '../context/AuthContext';
 import { useTheme }   from '../context/ThemeContext';
@@ -153,18 +154,26 @@ function LifeNavigator() {
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
 
 function MainTabs() {
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: theme.colors.tabBar,
+          position: 'absolute',
+          backgroundColor: 'transparent',
           borderTopColor:  theme.colors.tabBarBorder,
           borderTopWidth:  1,
         },
+        tabBarBackground: () => (
+          <BlurView
+            intensity={40}
+            tint={isDark ? 'dark' : 'light'}
+            style={StyleSheet.absoluteFill}
+          />
+        ),
         tabBarInactiveTintColor: theme.colors.tabInactive,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600', marginBottom: 2 },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '600', marginBottom: 2, fontFamily: 'Inter_600SemiBold' },
       }}
     >
       <Tab.Screen
