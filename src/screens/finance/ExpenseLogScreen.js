@@ -142,8 +142,9 @@ function PieSlice({ startDeg, deg, color, size }) {
   return <PieHalf startDeg={startDeg} deg={deg} color={color} size={size} />;
 }
 
-function DonutChart({ catSorted, total, c }) {
-  if (!catSorted.length || total === 0) return null;
+function DonutChart({ catSorted, c }) {
+  const catTotal = catSorted.reduce((sum, [, v]) => sum + v, 0);
+  if (!catSorted.length || catTotal === 0) return null;
 
   const SIZE = 160;
   const HOLE = 68;
@@ -153,7 +154,7 @@ function DonutChart({ catSorted, total, c }) {
   const slices = catSorted
     .filter(([, v]) => v > 0)
     .map(([cat, val]) => {
-      const deg = (val / total) * 360;
+      const deg = (val / catTotal) * 360;
       const s = { cat, startDeg: cumDeg, deg };
       cumDeg += deg;
       return s;
@@ -593,7 +594,7 @@ export default function ExpenseLogScreen() {
             ) : (
               <>
                 {/* Donut chart */}
-                <DonutChart catSorted={catSorted} total={total} c={c} />
+                <DonutChart catSorted={catSorted} c={c} />
 
                 {/* Legend */}
                 <View style={s.legendRow}>
@@ -602,7 +603,7 @@ export default function ExpenseLogScreen() {
                       <View style={[s.legendDot, { backgroundColor: CAT_COLOR[cat] || '#aaa' }]} />
                       <Text style={[s.legendCat, { color: c.textSecondary, fontFamily: MONO }]}>{cat}</Text>
                       <Text style={[s.legendPct, { color: c.textMuted, fontFamily: MONO }]}>
-                        {total > 0 ? Math.round((val / total) * 100) : 0}%
+                        {catSorted.length > 0 ? Math.round((val / catSorted.reduce((s, [, v]) => s + v, 0)) * 100) : 0}%
                       </Text>
                     </View>
                   ))}
