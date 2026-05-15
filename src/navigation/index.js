@@ -15,6 +15,7 @@ import FinancialPlannerScreen from '../screens/finance/FinancialPlannerScreen';
 import ShiftLogScreen from '../screens/finance/ShiftLogScreen';
 import ExpenseLogScreen from '../screens/finance/ExpenseLogScreen';
 import RothIRAScreen from '../screens/finance/RothIRAScreen';
+import MealCostTrackerScreen from '../screens/finance/MealCostTrackerScreen';
 
 import GolfHomeScreen from '../screens/golf/GolfHomeScreen';
 import RoundTrackerScreen from '../screens/golf/RoundTrackerScreen';
@@ -64,6 +65,7 @@ function FinanceNavigator() {
       <Finance.Screen name="ShiftLog" component={ShiftLogScreen} options={{ title: 'Shift Log' }} />
       <Finance.Screen name="ExpenseLog" component={ExpenseLogScreen} options={{ title: 'Expense Log' }} />
       <Finance.Screen name="RothIRA" component={RothIRAScreen} options={{ title: 'Roth IRA Tracker' }} />
+      <Finance.Screen name="MealCostTracker" component={MealCostTrackerScreen} options={{ title: 'Meal Cost Tracker' }} />
     </Finance.Navigator>
   );
 }
