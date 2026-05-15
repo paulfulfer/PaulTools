@@ -1,4 +1,3 @@
-// NOTE: requires react-native-svg → run: npx expo install react-native-svg
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TextInput, TouchableOpacity,
@@ -6,7 +5,6 @@ import {
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
-import Svg, { Path, Circle } from 'react-native-svg';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
@@ -101,54 +99,87 @@ function FLabel({ label, c }) {
 }
 const fl = StyleSheet.create({ t: { fontSize: 9, fontWeight: '600', letterSpacing: 0.8, marginBottom: 3, marginTop: 10 } });
 
-// ─── Donut Chart ──────────────────────────────────────────────────────────────
+// ─── Donut Chart (pure View — no native deps) ────────────────────────────────
+//
+// Each slice ≤ 180° is drawn with a rotated half-rectangle clipped inside
+// a circle container. Slices > 180° are split into two halves.
+// A centered hole View creates the donut effect.
+
+function PieHalf({ startDeg, deg, color, size }) {
+  const R = size / 2;
+  return (
+    <View style={{
+      position: 'absolute',
+      width: R, height: size, left: R,
+      overflow: 'hidden',
+      transform: [
+        { translateX: -(R / 2) },
+        { rotate: `${startDeg}deg` },
+        { translateX: R / 2 },
+      ],
+    }}>
+      <View style={{
+        position: 'absolute',
+        width: size, height: size, right: 0,
+        borderRadius: R,
+        backgroundColor: color,
+        transform: [{ rotate: `${deg - 180}deg` }],
+      }} />
+    </View>
+  );
+}
+
+function PieSlice({ startDeg, deg, color, size }) {
+  if (deg <= 0) return null;
+  if (deg > 180) {
+    return (
+      <>
+        <PieHalf startDeg={startDeg}       deg={180}       color={color} size={size} />
+        <PieHalf startDeg={startDeg + 180} deg={deg - 180} color={color} size={size} />
+      </>
+    );
+  }
+  return <PieHalf startDeg={startDeg} deg={deg} color={color} size={size} />;
+}
 
 function DonutChart({ catSorted, total, c }) {
   if (!catSorted.length || total === 0) return null;
 
-  const SIZE   = 180;
-  const CX     = SIZE / 2;
-  const CY     = SIZE / 2;
-  const ROUTER = 72;
-  const RHOLE  = 44;
-  const GAP    = catSorted.length > 1 ? 0.025 : 0;
+  const SIZE = 160;
+  const HOLE = 68;
+  const R    = SIZE / 2;
 
-  const polar = (angle, r) => [CX + r * Math.cos(angle), CY + r * Math.sin(angle)];
-
-  const wedgePath = (sa, ea) => {
-    const span = ea - sa;
-    if (span >= 2 * Math.PI - 0.001) {
-      // Full circle: two semicircle arcs from top
-      const [x1, y1] = polar(-Math.PI / 2, ROUTER);
-      const [x2, y2] = polar(Math.PI / 2,  ROUTER);
-      return `M ${CX} ${CY} L ${x1} ${y1} A ${ROUTER} ${ROUTER} 0 1 1 ${x2} ${y2} A ${ROUTER} ${ROUTER} 0 1 1 ${x1} ${y1} Z`;
-    }
-    const large = span > Math.PI ? 1 : 0;
-    const [sx, sy] = polar(sa, ROUTER);
-    const [ex, ey] = polar(ea, ROUTER);
-    return `M ${CX} ${CY} L ${sx} ${sy} A ${ROUTER} ${ROUTER} 0 ${large} 1 ${ex} ${ey} Z`;
-  };
-
-  let angle = -Math.PI / 2;
+  let cumDeg = -90; // start from top
   const slices = catSorted
     .filter(([, v]) => v > 0)
     .map(([cat, val]) => {
-      const sweep = (val / total) * 2 * Math.PI;
-      const sa = angle + GAP;
-      const ea = angle + sweep - GAP;
-      angle += sweep;
-      return { cat, sa, ea: Math.max(sa + 0.01, ea) };
+      const deg = (val / total) * 360;
+      const s = { cat, startDeg: cumDeg, deg };
+      cumDeg += deg;
+      return s;
     });
 
   return (
-    <View style={{ alignItems: 'center', marginVertical: 8 }}>
-      <Svg width={SIZE} height={SIZE}>
-        {slices.map(({ cat, sa, ea }) => (
-          <Path key={cat} d={wedgePath(sa, ea)} fill={CAT_COLOR[cat] || '#aaa'} />
-        ))}
-        {/* Donut hole overlay */}
-        <Circle cx={CX} cy={CY} r={RHOLE} fill={c.bgCard} />
-      </Svg>
+    <View style={{ alignItems: 'center', marginVertical: 10 }}>
+      <View style={{ width: SIZE, height: SIZE }}>
+        {/* Circle container clips all slices */}
+        <View style={{
+          position: 'absolute', width: SIZE, height: SIZE,
+          borderRadius: R, overflow: 'hidden',
+          backgroundColor: c.bgBase,
+        }}>
+          {slices.map(({ cat, startDeg, deg }) => (
+            <PieSlice key={cat} startDeg={startDeg} deg={deg} color={CAT_COLOR[cat] || '#aaa'} size={SIZE} />
+          ))}
+        </View>
+        {/* Donut hole */}
+        <View style={{
+          position: 'absolute',
+          width: HOLE, height: HOLE, borderRadius: HOLE / 2,
+          backgroundColor: c.bgCard,
+          top: R - HOLE / 2, left: R - HOLE / 2,
+        }} />
+      </View>
     </View>
   );
 }
