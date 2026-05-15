@@ -107,6 +107,11 @@ const fl = StyleSheet.create({ t: { fontSize: 9, fontWeight: '600', letterSpacin
 
 function PieHalf({ startDeg, deg, color, size }) {
   const R = size / 2;
+  // The clip container covers the right half of the circle space, rotated to startDeg.
+  // The fill is an R×SIZE rectangle that begins OUTSIDE the clip (left: -R → right edge at 0)
+  // and rotates clockwise by `deg` around its right edge (= circle center).
+  // At deg=0 the fill is entirely outside the clip → 0° visible.
+  // At deg=180 the fill has swept fully into the clip → 180° visible.
   return (
     <View style={{
       position: 'absolute',
@@ -120,10 +125,14 @@ function PieHalf({ startDeg, deg, color, size }) {
     }}>
       <View style={{
         position: 'absolute',
-        width: size, height: size, right: 0,
-        borderRadius: R,
+        width: R, height: size,
+        left: -R,
         backgroundColor: color,
-        transform: [{ rotate: `${deg - 180}deg` }],
+        transform: [
+          { translateX: R / 2 },
+          { rotate: `${deg}deg` },
+          { translateX: -(R / 2) },
+        ],
       }} />
     </View>
   );

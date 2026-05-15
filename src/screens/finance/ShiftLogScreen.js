@@ -140,7 +140,7 @@ function JobRow({ job, c, onSave, onRemove }) {
           selectedValue={unit}
           onValueChange={val => { setUnit(val); save({ unit: val }); }}
           mode="dropdown"
-          style={{ color: c.textPrimary, height: 36 }}
+          style={{ color: c.textPrimary, height: 36, backgroundColor: c.bgCard }}
           dropdownIconColor={c.textMuted}
           itemStyle={{ fontSize: 11, color: c.textPrimary }}
         >
@@ -400,7 +400,7 @@ export default function ShiftLogScreen() {
                 selectedValue={formJobId}
                 onValueChange={setFormJobId}
                 mode="dropdown"
-                style={{ color: c.textPrimary }}
+                style={{ color: c.textPrimary, backgroundColor: c.bgCard }}
                 dropdownIconColor={c.textMuted}
                 itemStyle={{ fontSize: 13, color: c.textPrimary, fontFamily: MONO }}
               >

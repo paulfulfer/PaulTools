@@ -490,8 +490,9 @@ export default function RoundTrackerScreen() {
 
       {/* ── Modal (add / edit / detail) ────────────── */}
       <Modal visible={modalMode !== null} animationType="slide" transparent onRequestClose={()=>setModalMode(null)}>
+          <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'padding'} style={{flex:1}}>
           <View style={s.modalOverlay}>
-            <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={[s.modalSheet, { backgroundColor:c.bgCard, borderColor:c.borderSubtle }]}>
+            <View style={[s.modalSheet, { backgroundColor:c.bgCard, borderColor:c.borderSubtle }]}>
               {/* Header */}
               <View style={[s.modalHeader, { borderBottomColor:c.borderSubtle, backgroundColor:c.bgCard }]}>
                 <Text style={[s.modalTitle, { color:c.textPrimary, fontFamily:MONO }]} numberOfLines={1}>{modalTitle}</Text>
@@ -667,8 +668,9 @@ export default function RoundTrackerScreen() {
                 )}
 
               </ScrollView>
-            </KeyboardAvoidingView>
+            </View>
           </View>
+          </KeyboardAvoidingView>
       </Modal>
 
     </View>
@@ -700,7 +702,7 @@ const s = StyleSheet.create({
 
   // Modal
   modalOverlay:{ flex:1, justifyContent:'center', backgroundColor:'rgba(0,0,0,0.45)', padding:20 },
-  modalSheet:  { maxHeight:'90%', borderRadius:20, borderWidth:1, overflow:'hidden' },
+  modalSheet:  { height:'85%', borderRadius:20, borderWidth:1, overflow:'hidden' },
   modalHeader: { flexDirection:'row', alignItems:'center', justifyContent:'space-between', padding:16, borderBottomWidth:1 },
   modalTitle:  { fontSize:15, fontWeight:'600', flex:1, marginRight:10 },
   closeBtn:    { width:28, height:28, borderRadius:14, borderWidth:1, alignItems:'center', justifyContent:'center' },
