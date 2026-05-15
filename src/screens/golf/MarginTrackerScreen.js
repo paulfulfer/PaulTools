@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
+import * as DocumentPicker from 'expo-document-picker';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
@@ -283,6 +284,55 @@ export default function MarginTrackerScreen() {
 
   // ── Handlers ─────────────────────────────────────────────────────────────
 
+  // ── CSV Import ────────────────────────────────────────────────────────────
+
+  const handleCSVImport = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
+      if (result.canceled) return;
+
+      const text    = await (await fetch(result.assets[0].uri)).text();
+      const lines   = text.split('\n').filter(l => l.trim());
+      if (lines.length < 2) return Alert.alert('Import Error', 'CSV appears to be empty.');
+
+      const headers    = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/"/g, ''));
+      const lateralIdx = headers.findIndex(h => h.includes('lateral'));
+      const carryIdx   = headers.findIndex(h => h.includes('carry'));
+
+      if (lateralIdx === -1) {
+        return Alert.alert('Import Error', 'Could not find a "Lateral" column. Please check the file format.');
+      }
+
+      const parsed = [];
+      let totalCarry = 0, carryCount = 0;
+
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',').map(col => col.trim().replace(/"/g, ''));
+        const raw  = cols[lateralIdx];
+        if (!raw) continue;
+        const numStr = raw.replace(/[LRlr]/g, '').trim();
+        const val    = parseFloat(numStr);
+        if (isNaN(val)) continue;
+        const dir = raw.toUpperCase().includes('L') || val < 0 ? 'L' : 'R';
+        parsed.push({ lateral: String(Math.abs(val)), dir });
+        if (carryIdx > -1) {
+          const cv = parseFloat(cols[carryIdx]);
+          if (!isNaN(cv) && cv > 0) { totalCarry += cv; carryCount++; }
+        }
+      }
+
+      if (parsed.length === 0) {
+        return Alert.alert('Import Error', 'No valid shot data found in the CSV.');
+      }
+
+      setShots(parsed);
+      if (carryCount > 0) setFCarry((totalCarry / carryCount).toFixed(1));
+      Alert.alert('Imported', `${parsed.length} shots imported from Flightscope CSV.`);
+    } catch (err) {
+      Alert.alert('Import Error', err.message);
+    }
+  };
+
   const updateShot = (i, field, val) =>
     setShots(prev => prev.map((s, idx) => idx === i ? { ...s, [field]: val } : s));
 
@@ -435,6 +485,15 @@ export default function MarginTrackerScreen() {
         <SecHeader title="Log a Session" open={logOpen} onToggle={() => setLogOpen(v => !v)} c={c} />
         {logOpen && (
           <View style={[st.card, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+
+            {/* Session header with import button */}
+            <View style={st.sessionHeader}>
+              <Text style={[st.sessionTitle, { color: c.textPrimary, fontFamily: MONO }]}>Session Details</Text>
+              <TouchableOpacity onPress={handleCSVImport}
+                style={[st.importBtn, { borderColor: c.teal, backgroundColor: c.tealGlow }]}>
+                <Text style={[st.importBtnTxt, { color: c.teal, fontFamily: MONO }]}>⬆ Import Flightscope CSV</Text>
+              </TouchableOpacity>
+            </View>
 
             {/* Club + Date */}
             <View style={st.formRow}>
@@ -642,6 +701,11 @@ const st = StyleSheet.create({
   noCarryTxt: { fontSize: 11, fontStyle: 'italic', marginTop: 8 },
 
   metRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 4 },
+
+  sessionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  sessionTitle:  { fontSize: 13, fontWeight: '600' },
+  importBtn:     { borderWidth: 1, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5 },
+  importBtnTxt:  { fontSize: 11, fontWeight: '600' },
 
   formRow:   { flexDirection: 'row', gap: 8, alignItems: 'flex-start', marginBottom: 8 },
   fLabel:    { fontSize: 9, fontWeight: '600', letterSpacing: 0.6, marginBottom: 4 },
