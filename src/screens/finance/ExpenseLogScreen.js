@@ -9,9 +9,10 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
-import { MONO } from '../../theme';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+
+const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
 
 const CATEGORIES = ['Equipment', 'Golf', 'Gas', 'Food', 'Social', 'Subscriptions', 'Emergency', 'Other'];
 

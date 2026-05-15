@@ -9,9 +9,10 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
-import { MONO } from '../../theme';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+
+const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
 
 const TYPE_ORDER  = ['driver','wood','hybrid','iron','wedge','putter','ball','training','other'];
 const TYPE_LABELS = { driver:'Driver', wood:'Wood', hybrid:'Hybrid', iron:'Iron', wedge:'Wedge', putter:'Putter', ball:'Ball', training:'Training', other:'Other' };
