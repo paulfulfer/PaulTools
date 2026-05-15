@@ -5,7 +5,7 @@ import { useTheme } from '../../context/ThemeContext';
 export default function PracticeLogScreen() {
   const { theme } = useTheme();
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.bgBase }]}>
+    <View style={styles.container}>
       <Text style={styles.icon}>🎯</Text>
       <Text style={[styles.title, { color: theme.colors.textPrimary }]}>Practice Log</Text>
       <Text style={[styles.sub, { color: theme.colors.textMuted }]}>Coming soon</Text>

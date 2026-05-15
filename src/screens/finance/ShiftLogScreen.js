@@ -349,7 +349,7 @@ export default function ShiftLogScreen() {
   // ── Loading ─────────────────────────────────────────────
   if (loading) {
     return (
-      <View style={[s.centered, { backgroundColor: c.bgBase }]}>
+      <View style={[s.centered]}>
         <ActivityIndicator color={c.blue} size="large" />
       </View>
     );
@@ -357,7 +357,7 @@ export default function ShiftLogScreen() {
 
   // ── Render ──────────────────────────────────────────────
   return (
-    <View style={{ flex: 1, backgroundColor: c.bgBase }}>
+    <View style={{ flex: 1 }}>
 
       {/* Saved flash */}
       {saved && (

@@ -352,7 +352,7 @@ export default function AcademicPlannerScreen({ navigation }) {
   }
 
   return (
-    <View style={{ flex:1, backgroundColor:c.bgBase }}>
+    <View style={{ flex:1 }}>
       {saved && (
         <View style={[s.savedBadge, { backgroundColor:c.greenGlow, borderColor:c.green }]}>
           <Text style={[s.savedText, { color:c.green, fontFamily:MONO }]}>✓ Saved</Text>

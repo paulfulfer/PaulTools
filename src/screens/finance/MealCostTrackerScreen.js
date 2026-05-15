@@ -402,11 +402,11 @@ export default function MealCostTrackerScreen() {
   // ── Render ──────────────────────────────────────────────────────────────────
 
   if (loading) {
-    return <View style={[st.centered, { backgroundColor: c.bgBase }]}><ActivityIndicator color={c.amber} size="large" /></View>;
+    return <View style={[st.centered]}><ActivityIndicator color={c.amber} size="large" /></View>;
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: c.bgBase }}>
+    <View style={{ flex: 1 }}>
       {saved && (
         <View style={[st.savedBadge, { backgroundColor: c.greenGlow, borderColor: c.green }]}>
           <Text style={[st.savedText, { color: c.green, fontFamily: MONO }]}>✓ Saved</Text>

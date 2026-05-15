@@ -78,7 +78,7 @@ function useStackOptions() {
     headerTintColor:  theme.colors.textPrimary,
     headerTitleStyle: { fontWeight: '700', fontSize: 17 },
     headerShadowVisible: false,
-    contentStyle:     { backgroundColor: theme.colors.bgBase },
+    contentStyle:     { backgroundColor: 'transparent' },
     headerRight:      () => <ThemeToggle />,
   };
 }
@@ -210,7 +210,7 @@ export default function RootNavigator() {
     colors: {
       ...baseTheme.colors,
       primary:      theme.colors.blue,
-      background:   theme.colors.bgBase,
+      background:   'transparent',
       card:         theme.colors.bgCard,
       text:         theme.colors.textPrimary,
       border:       theme.colors.borderSubtle,

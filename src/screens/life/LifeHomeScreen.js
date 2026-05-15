@@ -50,7 +50,7 @@ export default function LifeHomeScreen({ navigation }) {
 
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: theme.colors.bgBase }}
+      style={{ flex: 1 }}
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
     >

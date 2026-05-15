@@ -543,19 +543,19 @@ export default function ClassDetailScreen({ route, navigation }) {
 
   // ── Render ──────────────────────────────────────────────
   if (loading) {
-    return <View style={[s.centered, { backgroundColor: c.bgBase }]}><ActivityIndicator color={c.blue} size="large" /></View>;
+    return <View style={[s.centered]}><ActivityIndicator color={c.blue} size="large" /></View>;
   }
 
   const course     = courses.find(c2 => c2.id === courseId);
   if (!course) {
-    return <View style={[s.centered, { backgroundColor: c.bgBase }]}><Text style={{ color: c.textMuted }}>Course not found.</Text></View>;
+    return <View style={[s.centered]}><Text style={{ color: c.textMuted }}>Course not found.</Text></View>;
   }
 
   const incomplete = (course.assignments || []).filter(a => !a.done);
   const done       = (course.assignments || []).filter(a =>  a.done);
 
   return (
-    <View style={{ flex:1, backgroundColor:c.bgBase }}>
+    <View style={{ flex:1 }}>
       {saved && (
         <View style={[s.savedBadge, { backgroundColor:c.greenGlow, borderColor:c.green }]}>
           <Text style={[s.savedText, { color:c.green, fontFamily:MONO }]}>✓ Saved</Text>

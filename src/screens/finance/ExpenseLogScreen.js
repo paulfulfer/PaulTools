@@ -177,7 +177,7 @@ function DonutChart({ catSorted, c }) {
         <View style={{
           position: 'absolute', width: SIZE, height: SIZE,
           borderRadius: R, overflow: 'hidden',
-          backgroundColor: c.bgBase,
+          backgroundColor: c.bgBase2,
         }}>
           {slices.map(({ cat, startDeg, deg }) => (
             <PieSlice key={cat} startDeg={startDeg} deg={deg} color={CAT_COLOR[cat] || '#aaa'} size={SIZE} />
@@ -441,11 +441,11 @@ export default function ExpenseLogScreen() {
   // ─────────────────────────────────────────────────────────
 
   if (loading) {
-    return <View style={[s.centered, { backgroundColor: c.bgBase }]}><ActivityIndicator color={c.amber} size="large" /></View>;
+    return <View style={[s.centered]}><ActivityIndicator color={c.amber} size="large" /></View>;
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: c.bgBase }}>
+    <View style={{ flex: 1 }}>
 
       {saved && (
         <View style={[s.savedBadge, { backgroundColor: c.greenGlow, borderColor: c.green }]}>

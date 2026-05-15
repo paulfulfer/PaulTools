@@ -281,11 +281,11 @@ export default function EquipmentScreen() {
     .flatMap(s => (equipment[s.key] || []).filter(x => x.status === 'in-play').map(x => ({ item: x, section: s })));
 
   if (loading) {
-    return <View style={[s.centered, { backgroundColor: c.bgBase }]}><ActivityIndicator color={c.green} size="large" /></View>;
+    return <View style={[s.centered]}><ActivityIndicator color={c.green} size="large" /></View>;
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: c.bgBase }}>
+    <View style={{ flex: 1 }}>
       {saved && (
         <View style={[s.savedBadge, { backgroundColor: c.greenGlow, borderColor: c.green }]}>
           <Text style={[s.savedText, { color: c.green, fontFamily: MONO }]}>✓ Saved</Text>

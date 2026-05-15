@@ -21,7 +21,7 @@ export default function SignInScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.bgBase }]}>
+    <SafeAreaView style={styles.container}>
       <TouchableOpacity style={styles.themeBtn} onPress={toggleTheme}>
         <Text style={{ fontSize: 22 }}>{isDark ? '🌙' : '☀️'}</Text>
       </TouchableOpacity>

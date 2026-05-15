@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx expo *)"
+      "Bash(npx expo *)",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(p.dependencies['expo-blur'] || 'NOT FOUND'\\)\")",
+      "Bash(sed -i 's/\\\\[s\\\\.centered, { backgroundColor: c\\\\.bgBase }\\\\]/[s.centered]/g' src/screens/finance/ExpenseLogScreen.js src/screens/finance/FinancialPlannerScreen.js src/screens/finance/RothIRAScreen.js src/screens/golf/EquipmentScreen.js src/screens/life/ClassDetailScreen.js)",
+      "Bash(sed -i 's/\\\\[s\\\\.centered, { backgroundColor: c\\\\.bgBase }\\\\]/[s.centered]/g' src/screens/finance/ShiftLogScreen.js)",
+      "Bash(sed -i 's/\\\\[st\\\\.centered, { backgroundColor: c\\\\.bgBase }\\\\]/[st.centered]/g' src/screens/golf/MarginTrackerScreen.js src/screens/finance/MealCostTrackerScreen.js src/screens/life/WorkoutTrackerScreen.js)"
     ]
   }
 }

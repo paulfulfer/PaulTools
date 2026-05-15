@@ -95,7 +95,7 @@ export default function SettingsScreen() {
 
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: c.bgBase }}
+      style={{ flex: 1 }}
       contentContainerStyle={s.scroll}
       showsVerticalScrollIndicator={false}
     >

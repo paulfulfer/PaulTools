@@ -79,7 +79,7 @@ function GoalDonut({ slices, totalSaved, c }) {
   return (
     <View style={{ width: SIZE, height: SIZE }}>
       <View style={{ position: 'absolute', width: SIZE, height: SIZE, borderRadius: R,
-        overflow: 'hidden', backgroundColor: c.bgBase }}>
+        overflow: 'hidden', backgroundColor: c.bgBase2 }}>
         {angled.map(s => <PieSlice key={s.name} startDeg={s.startDeg} deg={s.deg} color={s.color} size={SIZE} />)}
       </View>
       <View style={{ position: 'absolute', width: HOLE, height: HOLE, borderRadius: HOLE / 2,
@@ -341,11 +341,11 @@ export default function FinancialPlannerScreen() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (loading) {
-    return <View style={[s.centered, { backgroundColor: c.bgBase }]}><ActivityIndicator color={c.green} size="large" /></View>;
+    return <View style={[s.centered]}><ActivityIndicator color={c.green} size="large" /></View>;
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: c.bgBase }}>
+    <View style={{ flex: 1 }}>
       {saved && (
         <View style={[s.savedBadge, { backgroundColor: c.greenGlow, borderColor: c.green }]}>
           <Text style={[s.savedText, { color: c.green, fontFamily: MONO }]}>✓ Saved</Text>
