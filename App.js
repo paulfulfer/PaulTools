@@ -3,6 +3,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { AuthProvider } from './src/context/AuthContext';
+import { HapticsProvider } from './src/context/HapticsContext';
 import RootNavigator from './src/navigation';
 
 function StatusBarController() {
@@ -14,10 +15,12 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <AuthProvider>
-          <StatusBarController />
-          <RootNavigator />
-        </AuthProvider>
+        <HapticsProvider>
+          <AuthProvider>
+            <StatusBarController />
+            <RootNavigator />
+          </AuthProvider>
+        </HapticsProvider>
       </ThemeProvider>
     </SafeAreaProvider>
   );
