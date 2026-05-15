@@ -46,6 +46,19 @@ const SECTIONS = [
       },
     ],
   },
+  {
+    label: 'Training & Analysis',
+    tools: [
+      {
+        id: 'mt',
+        title: 'Margin Tracker',
+        description: 'Dispersion analysis, par margin benchmarks, and session trend tracking.',
+        icon: '🎯',
+        accent: 'green',
+        route: 'MarginTracker',
+      },
+    ],
+  },
 ];
 
 export default function GolfHomeScreen({ navigation }) {

@@ -22,6 +22,7 @@ import RoundTrackerScreen from '../screens/golf/RoundTrackerScreen';
 import PracticeLogScreen from '../screens/golf/PracticeLogScreen';
 import EquipmentScreen from '../screens/golf/EquipmentScreen';
 import ClubDistancesScreen from '../screens/golf/ClubDistancesScreen';
+import MarginTrackerScreen from '../screens/golf/MarginTrackerScreen';
 
 import LifeHomeScreen from '../screens/life/LifeHomeScreen';
 import AcademicPlannerScreen from '../screens/life/AcademicPlannerScreen';
@@ -79,6 +80,7 @@ function GolfNavigator() {
       <Golf.Screen name="PracticeLog" component={PracticeLogScreen} options={{ title: 'Practice Log' }} />
       <Golf.Screen name="Equipment" component={EquipmentScreen} options={{ title: 'Equipment' }} />
       <Golf.Screen name="ClubDistances" component={ClubDistancesScreen} options={{ title: 'Club Distances' }} />
+      <Golf.Screen name="MarginTracker" component={MarginTrackerScreen} options={{ title: 'Margin Tracker' }} />
     </Golf.Navigator>
   );
 }
