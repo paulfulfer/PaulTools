@@ -9,6 +9,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useHaptics } from '../../hooks/useHaptics';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -168,6 +169,7 @@ const jr = StyleSheet.create({
 export default function ShiftLogScreen() {
   const { theme } = useTheme();
   const { user }  = useAuth();
+  const { triggerHaptic } = useHaptics();
   const c = theme.colors;
 
   // ── Data state ──────────────────────────────────────────
@@ -257,6 +259,7 @@ export default function ShiftLogScreen() {
 
   // ── Log shift ───────────────────────────────────────────
   const logShift = async () => {
+    triggerHaptic();
     const job = jobs.find(j => j.id === formJobId);
     if (!job) return Alert.alert('Error', 'Select a job.');
     const isStipend = job.unit === 'nights';
@@ -313,6 +316,7 @@ export default function ShiftLogScreen() {
 
   // ── Job management ──────────────────────────────────────
   const addJob = () => {
+    triggerHaptic();
     const updated = [...jobs, { id: 'j' + Date.now(), title: 'New Job', wage: 0, unit: 'hrs' }];
     setJobs(updated);
     persistJobs(updated);

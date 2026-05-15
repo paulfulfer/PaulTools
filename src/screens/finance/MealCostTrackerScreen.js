@@ -8,6 +8,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useHaptics } from '../../hooks/useHaptics';
 
 const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
 
@@ -52,6 +53,7 @@ const mc = StyleSheet.create({
 export default function MealCostTrackerScreen() {
   const { theme } = useTheme();
   const { user }  = useAuth();
+  const { triggerHaptic } = useHaptics();
   const c = theme.colors;
 
   // ── Data state ──────────────────────────────────────────────────────────────
@@ -134,6 +136,7 @@ export default function MealCostTrackerScreen() {
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   const addPurchase = async () => {
+    triggerHaptic();
     const cost  = parseFloat(fCost);
     const units = parseFloat(fUnits);
     if (!fName.trim())              return Alert.alert('Required', 'Enter an item name.');
@@ -168,6 +171,7 @@ export default function MealCostTrackerScreen() {
   };
 
   const logMeal = async () => {
+    triggerHaptic();
     if (!mName.trim()) return Alert.alert('Required', 'Enter a meal name.');
 
     let mealCost = 0;

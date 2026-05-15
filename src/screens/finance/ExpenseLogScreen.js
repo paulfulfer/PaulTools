@@ -9,6 +9,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useHaptics } from '../../hooks/useHaptics';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -210,7 +211,9 @@ const AddSubModal = React.memo(function AddSubModal({ visible, onClose, onSave }
     if (visible) { setName(''); setAmount(''); setFreq('monthly'); setRenewal(new Date()); setPicker(false); }
   }, [visible]);
 
+  const { triggerHaptic: triggerH } = useHaptics();
   const handleSave = () => {
+    triggerH();
     if (!name.trim()) return Alert.alert('Required', 'Enter a subscription name.');
     const amt = parseFloat(amount);
     if (isNaN(amt) || amt <= 0) return Alert.alert('Required', 'Enter a valid amount.');
@@ -315,6 +318,7 @@ const sm = StyleSheet.create({
 export default function ExpenseLogScreen() {
   const { theme } = useTheme();
   const { user }  = useAuth();
+  const { triggerHaptic } = useHaptics();
   const c = theme.colors;
 
   const [entries, setEntries] = useState([]);
@@ -387,6 +391,7 @@ export default function ExpenseLogScreen() {
   // ── Handlers ─────────────────────────────────────────────
 
   const logExpense = async () => {
+    triggerHaptic();
     const amt = parseFloat(formAmt);
     if (!formDesc.trim())       return Alert.alert('Missing info', 'Enter a description.');
     if (isNaN(amt) || amt <= 0) return Alert.alert('Missing info', 'Enter a valid amount.');
@@ -409,6 +414,7 @@ export default function ExpenseLogScreen() {
   };
 
   const handleAddSub = useCallback(async (subData) => {
+    triggerHaptic();
     const updated = [...subsRef.current, { ...subData, id: Date.now() }];
     setSubs(updated);
     setAddSubModal(false);

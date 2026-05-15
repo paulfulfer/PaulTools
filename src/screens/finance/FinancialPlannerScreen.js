@@ -7,6 +7,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useHaptics } from '../../hooks/useHaptics';
 
 const MONO     = Platform.select({ ios: 'Menlo', android: 'monospace' });
 const PA_RATE  = 0.0307;
@@ -112,6 +113,7 @@ const DEF_REPAYMENTS = [
 export default function FinancialPlannerScreen() {
   const { theme } = useTheme();
   const { user }  = useAuth();
+  const { triggerHaptic } = useHaptics();
   const c = theme.colors;
 
   // Goal color palette from theme tokens
@@ -251,6 +253,7 @@ export default function FinancialPlannerScreen() {
   // ── Job handlers ───────────────────────────────────────────────────────────
 
   const addJob = () => {
+    triggerHaptic();
     const id = idCRef.current, newId = id + 1;
     const newJobs = [...jobsRef.current, { id, name: 'New Job', rate: '15', hours: '20', weeks: '10' }];
     setJobs(newJobs);  jobsRef.current = newJobs;
@@ -318,6 +321,7 @@ export default function FinancialPlannerScreen() {
   };
 
   const saveModal = () => {
+    triggerHaptic();
     const name   = mName.trim();
     const amount = parseFloat(mAmount) || 0;
     if (!name) return Alert.alert('Required', 'Enter a name.');

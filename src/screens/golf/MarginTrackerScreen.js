@@ -10,6 +10,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useHaptics } from '../../hooks/useHaptics';
 
 const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
 const EQUIP_TYPES = ['driver', 'wood', 'hybrid', 'iron', 'wedge'];
@@ -146,6 +147,7 @@ const makeShots = (n = 10) => Array(n).fill(null).map(() => ({ lateral: '', dir:
 export default function MarginTrackerScreen() {
   const { theme } = useTheme();
   const { user }  = useAuth();
+  const { triggerHaptic } = useHaptics();
   const c = theme.colors;
 
   // ── Data ──────────────────────────────────────────────────────────────────
@@ -340,6 +342,7 @@ export default function MarginTrackerScreen() {
   const removeShot = () => setShots(prev => prev.length > 1 ? prev.slice(0, -1) : prev);
 
   const saveSession = async () => {
+    triggerHaptic();
     if (!fClub) return Alert.alert('Required', 'Select a club.');
     const valid = shots
       .filter(s => parseFloat(s.lateral) > 0)

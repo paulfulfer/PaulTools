@@ -9,6 +9,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useHaptics } from '../../hooks/useHaptics';
 
 // ─── Constants & helpers ──────────────────────────────────────────────────────
 
@@ -69,6 +70,7 @@ function FLabel({ label, c }) {
 
 const ContactFormModal = React.memo(function ContactFormModal({ visible, initialValues, onSave, onDelete, onClose }) {
   const { theme } = useTheme();
+  const { triggerHaptic } = useHaptics();
   const c = theme.colors;
 
   const [name,     setName]     = useState('');
@@ -105,6 +107,7 @@ const ContactFormModal = React.memo(function ContactFormModal({ visible, initial
   }, [visible, initialValues]);
 
   const handleSave = () => {
+    triggerHaptic();
     if (!name.trim()) return Alert.alert('Required', 'Name is required.');
     onSave(
       {
@@ -419,6 +422,7 @@ const dm = StyleSheet.create({
 export default function NetworkScreen() {
   const { theme } = useTheme();
   const { user }  = useAuth();
+  const { triggerHaptic } = useHaptics();
   const c = theme.colors;
 
   const [contacts,  setContacts]  = useState([]);
@@ -479,6 +483,7 @@ export default function NetworkScreen() {
   // ── Stable callbacks ─────────────────────────────────────────────────────
 
   const onSaveStable = useCallback(async (formData, editingId) => {
+    triggerHaptic();
     const allContacts = contactsRef.current;
     const ctr         = counterRef.current;
     let updContacts, newCtr;

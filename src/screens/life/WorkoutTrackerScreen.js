@@ -8,6 +8,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useHaptics } from '../../hooks/useHaptics';
 
 const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
 
@@ -202,6 +203,7 @@ const mc = StyleSheet.create({
 export default function WorkoutTrackerScreen() {
   const { theme } = useTheme();
   const { user }  = useAuth();
+  const { triggerHaptic } = useHaptics();
   const c = theme.colors;
 
   const [cards,    setCards]    = useState([]);
@@ -295,6 +297,7 @@ export default function WorkoutTrackerScreen() {
   // ── Cards ─────────────────────────────────────────────────────────────────────
 
   const handleAddCard = useCallback(async (name) => {
+    triggerHaptic();
     const id = idCRef.current;
     const card = {
       id, name,
@@ -324,6 +327,7 @@ export default function WorkoutTrackerScreen() {
   // ── Session ───────────────────────────────────────────────────────────────────
 
   const handleLogSession = async () => {
+    triggerHaptic();
     const id = idCRef.current;
     const session = {
       id, prog: fProg, day: fDay, week: fWeek,
@@ -354,6 +358,7 @@ export default function WorkoutTrackerScreen() {
   // ── Weight ────────────────────────────────────────────────────────────────────
 
   const handleLogWeight = async () => {
+    triggerHaptic();
     const val = parseFloat(fWeight);
     if (isNaN(val) || val <= 0) return Alert.alert('Invalid', 'Please enter a valid weight.');
     const id = idCRef.current;

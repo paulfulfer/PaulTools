@@ -9,6 +9,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useHaptics } from '../../hooks/useHaptics';
 
 // ─── Constants & helpers ──────────────────────────────────────────────────────
 
@@ -176,6 +177,7 @@ const EMPTY_FORM = {
 export default function RoundTrackerScreen() {
   const { theme } = useTheme();
   const { user }  = useAuth();
+  const { triggerHaptic } = useHaptics();
   const c = theme.colors;
 
   // ── Data ────────────────────────────────────────────────
@@ -325,6 +327,7 @@ export default function RoundTrackerScreen() {
 
   // ── Save form ────────────────────────────────────────────
   const saveForm = async () => {
+    triggerHaptic();
     const score = parseInt(form.score);
     if (isNaN(score)) return Alert.alert('Missing score', 'Enter a gross score.');
     const round = {

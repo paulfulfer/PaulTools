@@ -9,6 +9,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useHaptics } from '../../hooks/useHaptics';
 
 // ─── Constants & helpers ──────────────────────────────────────────────────────
 
@@ -137,6 +138,7 @@ function FLabel({ label, c }) {
 // Wrapped in React.memo + reads theme internally so no prop change can re-render it
 // while the user is typing. Only re-renders when `visible` changes.
 const AddCourseModal = React.memo(function AddCourseModal({ visible, onSave, onClose }) {
+  const { triggerHaptic } = useHaptics();
   // Own copies of theme — not passed from parent so parent re-renders are invisible here
   const { theme } = useTheme();
   const c = theme.colors;
@@ -156,6 +158,7 @@ const AddCourseModal = React.memo(function AddCourseModal({ visible, onSave, onC
   }, [visible]);
 
   const handleSave = () => {
+    triggerHaptic();
     if (!name.trim()) return Alert.alert('Required', 'Course name is required.');
     onSave({ name: name.trim(), code: code.trim(), professor: prof.trim(), semester: sem.trim(), credits: parseInt(creds) || 3, color });
   };

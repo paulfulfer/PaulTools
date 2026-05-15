@@ -8,6 +8,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useHaptics } from '../../hooks/useHaptics';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -120,6 +121,7 @@ const rs = StyleSheet.create({
 export default function RothIRAScreen() {
   const { theme } = useTheme();
   const { user }  = useAuth();
+  const { triggerHaptic } = useHaptics();
   const c = theme.colors;
 
   const [deposits,       setDeposits]       = useState([]);
@@ -221,6 +223,7 @@ export default function RothIRAScreen() {
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   const logDeposit = () => {
+    triggerHaptic();
     const amt = parseFloat(formAmt);
     if (isNaN(amt) || amt <= 0) return Alert.alert('Invalid amount', 'Enter a positive amount.');
 

@@ -9,6 +9,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useHaptics } from '../../hooks/useHaptics';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -228,6 +229,7 @@ const cp = StyleSheet.create({
 export default function ClubDistancesScreen() {
   const { theme } = useTheme();
   const { user }  = useAuth();
+  const { triggerHaptic } = useHaptics();
   const c = theme.colors;
 
   // ── Data ────────────────────────────────────────────────
@@ -346,6 +348,7 @@ export default function ClubDistancesScreen() {
 
   // ── Log session ──────────────────────────────────────────
   const logSession = async () => {
+    triggerHaptic();
     if (!formClub) return Alert.alert('Missing club', 'Select a club.');
     const carry = parseFloat(formCarry) || 0;
     const total = parseFloat(formTotal) || 0;
