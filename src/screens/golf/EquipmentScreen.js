@@ -8,10 +8,9 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { MONO } from '../../theme';
 
 // ─── Configuration ────────────────────────────────────────────────────────────
-
-const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
 
 const SECTIONS = [
   { key:'driver',   label:'Drivers',                        icon:'🏌️', singular:'Driver'       },

@@ -8,8 +8,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
-
-const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
+import { MONO } from '../../theme';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

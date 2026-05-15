@@ -9,10 +9,9 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { MONO } from '../../theme';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
 
 const DEFAULT_JOBS = [
   { id: 'j1', title: 'SESP',          wage: 10.25, unit: 'hrs' },

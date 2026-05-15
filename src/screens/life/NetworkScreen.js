@@ -9,10 +9,9 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { MONO } from '../../theme';
 
 // ─── Constants & helpers ──────────────────────────────────────────────────────
-
-const MONO = Platform.select({ ios: 'Menlo', android: 'monospace' });
 
 const TAGS = ['mentor','peer','professor','industry','recruiter','other'];
 
