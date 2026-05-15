@@ -1,415 +1,111 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TextInput, TouchableOpacity,
-  Switch, StyleSheet, Alert, Platform, Modal, ActivityIndicator,
+  StyleSheet, Alert, Modal, ActivityIndicator, Platform,
 } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import { Picker } from '@react-native-picker/picker';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 
-// ─── Constants & defaults ─────────────────────────────────────────────────────
+const MONO     = Platform.select({ ios: 'Menlo', android: 'monospace' });
+const PA_RATE  = 0.0307;
+const VA_RATE  = 0.0575;
 
-const MONO    = Platform.select({ ios: 'Menlo', android: 'monospace' });
-const TAX     = 0.1072;
-const SAVINGS = 1100;
+// ─── Tax / format helpers ─────────────────────────────────────────────────────
 
-const CATEGORIES = ['Equipment','Golf','Gas','Food','Social','Subscriptions','Emergency','Other'];
-const CAT_COLOR  = { Equipment:'#9b87f5', Golf:'#4a9eff', Gas:'#e6a020', Food:'#1fbd8a', Social:'#f06292', Subscriptions:'#888', Emergency:'#555', Other:'#444' };
-const GOAL_COLORS = ['#2a7de1','#0e9e70','#c27d08','#6c5bbf','#d03030','#1899a8','#e06030','#888'];
+function calcFedTax(gross) {
+  const taxable  = Math.max(0, gross - 15000);
+  const brackets = [[11925, 0.10], [48475, 0.12], [103350, 0.22], [197300, 0.24]];
+  let tax = 0, prev = 0;
+  for (const [limit, rate] of brackets) {
+    if (taxable <= prev) break;
+    tax += (Math.min(taxable, limit) - prev) * rate;
+    prev = limit;
+  }
+  return tax;
+}
+
+function fmtAmt(n) { return '$' + Math.round(Math.abs(n)).toLocaleString(); }
+function fmtDec(n) { return '$' + Math.abs(n).toFixed(2); }
+
+// ─── Pure-View donut chart ────────────────────────────────────────────────────
+
+function PieHalf({ startDeg, deg, color, size }) {
+  const R = size / 2;
+  return (
+    <View style={{ position: 'absolute', width: R, height: size, left: R, overflow: 'hidden',
+      transform: [{ translateX: -(R / 2) }, { rotate: `${startDeg}deg` }, { translateX: R / 2 }] }}>
+      <View style={{ position: 'absolute', width: size, height: size, right: 0,
+        borderRadius: R, backgroundColor: color,
+        transform: [{ rotate: `${deg - 180}deg` }] }} />
+    </View>
+  );
+}
+
+function PieSlice({ startDeg, deg, color, size }) {
+  if (deg <= 0) return null;
+  if (deg > 180) return (
+    <>
+      <PieHalf startDeg={startDeg}       deg={180}       color={color} size={size} />
+      <PieHalf startDeg={startDeg + 180} deg={deg - 180} color={color} size={size} />
+    </>
+  );
+  return <PieHalf startDeg={startDeg} deg={deg} color={color} size={size} />;
+}
+
+function GoalDonut({ slices, totalSaved, c }) {
+  const SIZE = 92, HOLE = 62, R = SIZE / 2;
+  const valid = slices.filter(s => s.val > 0);
+
+  if (!valid.length || totalSaved <= 0) {
+    return (
+      <View style={{ width: SIZE, height: SIZE, borderRadius: R, backgroundColor: c.bgBase,
+        alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ color: c.textMuted, fontFamily: MONO, fontSize: 11 }}>—</Text>
+      </View>
+    );
+  }
+
+  let cumDeg = -90;
+  const angled = valid.map(s => {
+    const deg = (s.val / totalSaved) * 360;
+    const r = { ...s, startDeg: cumDeg, deg };
+    cumDeg += deg;
+    return r;
+  });
+
+  return (
+    <View style={{ width: SIZE, height: SIZE }}>
+      <View style={{ position: 'absolute', width: SIZE, height: SIZE, borderRadius: R,
+        overflow: 'hidden', backgroundColor: c.bgBase }}>
+        {angled.map(s => <PieSlice key={s.name} startDeg={s.startDeg} deg={s.deg} color={s.color} size={SIZE} />)}
+      </View>
+      <View style={{ position: 'absolute', width: HOLE, height: HOLE, borderRadius: HOLE / 2,
+        backgroundColor: c.bgCard, top: R - HOLE / 2, left: R - HOLE / 2 }} />
+      <View style={{ position: 'absolute', width: SIZE, height: SIZE, alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ fontSize: 11, fontWeight: '700', color: c.textPrimary, fontFamily: MONO }}>{fmtAmt(totalSaved)}</Text>
+        <Text style={{ fontSize: 7, color: c.textMuted, fontFamily: MONO, letterSpacing: 0.6, marginTop: 1 }}>SAVED</Text>
+      </View>
+    </View>
+  );
+}
+
+// ─── Default data ─────────────────────────────────────────────────────────────
 
 const DEF_JOBS = [
-  { id:0, name:'SESP',          unit:'hrs', rate:10.25, qty:20, weeks:12 },
-  { id:1, name:'Honors Center', unit:'hrs', rate:10.25, qty:2,  weeks:12 },
-  { id:2, name:'Internship',    unit:'hrs', rate:15,    qty:40, weeks:12 },
-];
-const DEF_EXPENSES = [
-  { id:0, name:'Launch Monitor',   category:'Equipment',     amount:4500 },
-  { id:1, name:'iPad',             category:'Equipment',     amount:250  },
-  { id:2, name:'Golf Membership',  category:'Golf',          amount:400  },
-  { id:3, name:'Golf Green Fees',  category:'Golf',          amount:400  },
-  { id:4, name:'Gas',              category:'Gas',           amount:600  },
-  { id:5, name:'Misc Meals',       category:'Food',          amount:300  },
-  { id:6, name:'Social',           category:'Social',        amount:60   },
-  { id:7, name:'Claude Pro (3mo)', category:'Subscriptions', amount:60   },
-  { id:8, name:'Emergency Buffer', category:'Emergency',     amount:0    },
-];
-const DEF_SCHEDULES = [
-  { id:0, name:'Launch Monitor', total:4750, fromSavings:1100, interestFree:true, apr:22 },
+  { id: 1, name: 'Hershey Internship', rate: '18', hours: '40', weeks: '12' },
+  { id: 2, name: 'RA Position',        rate: '12', hours: '20', weeks: '12' },
+  { id: 3, name: 'Part-Time Job',      rate: '15', hours: '15', weeks: '20' },
 ];
 const DEF_GOALS = [
-  { id:0, name:'Launch Monitor + iPad', target:4750, current:0, deferred:false, color:'#9b87f5' },
-  { id:1, name:'Roth IRA 2026',         target:7500, current:0, deferred:false, color:'#2a7de1' },
-  { id:2, name:'Truck Fund',            target:1500, current:0, deferred:true,  color:'#a0a0a0' },
+  { id: 1, name: 'Roth IRA',      amount: '7500', saved: '0', deferred: false },
+  { id: 2, name: 'Launch Monitor',amount: '4500', saved: '0', deferred: false },
+  { id: 3, name: 'Truck Fund',    amount: '2000', saved: '0', deferred: false },
 ];
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function fmt(n)  { return '$' + Math.round(Math.abs(Number(n)||0)).toLocaleString(); }
-function fmtD(n) { return '$' + Math.abs(Number(n)||0).toFixed(2); }
-function fmts(n) { return (Number(n)<0?'-':'') + fmt(n); }
-function fmtDateKey(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
-function fmtDateDisp(d) { return d ? d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : 'Pick date'; }
-
-function mpCalc(principal, apr, months) {
-  if (!months) return 0;
-  if (!apr) return principal / months;
-  const r = (apr / 100) / 12;
-  return principal * r * Math.pow(1+r, months) / (Math.pow(1+r, months) - 1);
-}
-
-// ─── Tiny shared sub-components ───────────────────────────────────────────────
-
-function SecHeader({ title, open, onToggle, c, rightEl }) {
-  return (
-    <TouchableOpacity style={[sh.row, { borderBottomColor: c.borderSubtle }]} onPress={onToggle} activeOpacity={0.7}>
-      <Text style={[sh.label, { color: c.textMuted, fontFamily: MONO }]}>{title.toUpperCase()}</Text>
-      <View style={{ flexDirection:'row', alignItems:'center', gap:8 }}>
-        {rightEl}
-        <Text style={[sh.arrow, { color: c.textMuted }]}>{open ? '▲' : '▼'}</Text>
-      </View>
-    </TouchableOpacity>
-  );
-}
-const sh = StyleSheet.create({
-  row:   { flexDirection:'row', justifyContent:'space-between', alignItems:'center', borderBottomWidth:1, paddingVertical:10, marginTop:18, marginBottom:8 },
-  label: { fontSize:10, fontWeight:'600', letterSpacing:1 },
-  arrow: { fontSize:10 },
-});
-
-function FLabel({ label, c }) {
-  return <Text style={[{ fontSize:9, fontWeight:'600', letterSpacing:0.8, marginBottom:3, marginTop:10, color:c.textMuted, fontFamily:MONO }]}>{label.toUpperCase()}</Text>;
-}
-
-function MetCard({ label, value, sub, color, c }) {
-  return (
-    <View style={[mc.card, { backgroundColor:c.bgCard, borderColor:c.borderSubtle }]}>
-      <Text style={[mc.label, { color:c.textMuted, fontFamily:MONO }]}>{label.toUpperCase()}</Text>
-      <Text style={[mc.value, { color:color||c.textPrimary, fontFamily:MONO }]}>{value}</Text>
-      {!!sub && <Text style={[mc.sub, { color:c.textMuted, fontFamily:MONO }]}>{sub}</Text>}
-    </View>
-  );
-}
-const mc = StyleSheet.create({
-  card:  { flex:1, minWidth:'45%', borderWidth:1, borderRadius:8, padding:10, margin:3 },
-  label: { fontSize:9, letterSpacing:0.8, marginBottom:3 },
-  value: { fontSize:17, fontWeight:'600', letterSpacing:-0.3 },
-  sub:   { fontSize:9, marginTop:2 },
-});
-
-function BarRow({ label, value, pct, color, c }) {
-  return (
-    <View style={br.row}>
-      <Text style={[br.label, { color:c.textMuted, fontFamily:MONO }]}>{label}</Text>
-      <View style={[br.track, { backgroundColor:c.bgBase, borderColor:c.borderSubtle }]}>
-        <View style={[br.fill, { width:`${Math.min(100,pct).toFixed(1)}%`, backgroundColor:color }]} />
-      </View>
-      <Text style={[br.amt, { color:c.textPrimary, fontFamily:MONO }]}>{value}</Text>
-    </View>
-  );
-}
-const br = StyleSheet.create({
-  row:   { flexDirection:'row', alignItems:'center', marginBottom:6, gap:8 },
-  label: { width:110, fontSize:11 },
-  track: { flex:1, height:7, borderRadius:4, borderWidth:1, overflow:'hidden' },
-  fill:  { height:'100%', borderRadius:4 },
-  amt:   { width:58, textAlign:'right', fontSize:12, fontWeight:'600' },
-});
-
-function InputRow({ label, value, onChange, onBlur, c, color }) {
-  return (
-    <View style={ir.row}>
-      <Text style={[ir.label, { color:c.textMuted, fontFamily:MONO }]}>{label}</Text>
-      <TextInput
-        style={[ir.input, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:color||c.textPrimary, fontFamily:MONO }]}
-        value={value} onChangeText={onChange} onBlur={onBlur} keyboardType="decimal-pad" />
-    </View>
-  );
-}
-const ir = StyleSheet.create({
-  row:   { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:5 },
-  label: { fontSize:12, flex:1 },
-  input: { width:80, fontSize:12, paddingHorizontal:7, paddingVertical:4, borderWidth:1, borderRadius:5, textAlign:'right' },
-});
-
-function DashedAdd({ label, c, onPress }) {
-  return (
-    <TouchableOpacity style={[da.btn, { borderColor:c.borderSubtle }]} onPress={onPress}>
-      <Text style={[da.txt, { color:c.textMuted, fontFamily:MONO }]}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-const da = StyleSheet.create({
-  btn: { borderWidth:1, borderStyle:'dashed', borderRadius:8, padding:14, alignItems:'center', marginBottom:6 },
-  txt: { fontSize:12 },
-});
-
-// ─── JobCard ──────────────────────────────────────────────────────────────────
-
-function JobCard({ job, c, onSave, onRemove }) {
-  const [name,  setName]  = useState(job.name);
-  const [qty,   setQty]   = useState(String(job.qty));
-  const [rate,  setRate]  = useState(String(job.rate));
-  const [unit,  setUnit]  = useState(job.unit);
-  const [weeks, setWeeks] = useState(String(job.weeks));
-
-  const save = (ov={}) => onSave(job.id, {
-    name: ov.name??name, qty: parseFloat(ov.qty??qty)||0,
-    rate: parseFloat(ov.rate??rate)||0, unit: ov.unit??unit,
-    weeks: parseFloat(ov.weeks??weeks)||0,
-  });
-
-  const wkEarn  = (parseFloat(qty)||0) * (parseFloat(rate)||0);
-  const totEarn = wkEarn * (parseFloat(weeks)||0);
-
-  return (
-    <View style={[jc.card, { backgroundColor:c.bgCard, borderColor:c.borderSubtle }]}>
-      <TouchableOpacity style={[jc.rmBtn, { backgroundColor:c.bgBase, borderColor:c.borderSubtle }]} onPress={onRemove}>
-        <Text style={{ color:c.textMuted, fontSize:13 }}>×</Text>
-      </TouchableOpacity>
-      <TextInput style={[jc.title, { color:c.textSecondary, borderBottomColor:c.borderSubtle, fontFamily:MONO }]}
-        value={name} onChangeText={setName} onBlur={()=>save()} />
-      <InputRow label={unit==='nights'?'Nights/wk':'Hrs/week'} value={qty}   onChange={setQty}   onBlur={()=>save()} c={c} />
-      <InputRow label="Rate ($/unit)"                            value={rate}  onChange={setRate}  onBlur={()=>save()} c={c} />
-      <View style={ir.row}>
-        <Text style={[ir.label, { color:c.textMuted, fontFamily:MONO }]}>Unit</Text>
-        <View style={[jc.pickWrap, { borderColor:c.borderSubtle, backgroundColor:c.bgBase }]}>
-          <Picker selectedValue={unit} onValueChange={val=>{ setUnit(val); save({unit:val}); }}
-            style={{ color:c.textPrimary, height:32 }} dropdownIconColor={c.textMuted}
-            itemStyle={{ fontSize:11, color:c.textPrimary }}>
-            <Picker.Item label="hrs"    value="hrs"    color={c.textPrimary} />
-            <Picker.Item label="nights" value="nights" color={c.textPrimary} />
-          </Picker>
-        </View>
-      </View>
-      <InputRow label="Weeks" value={weeks} onChange={setWeeks} onBlur={()=>save()} c={c} />
-      <View style={[jc.foot, { borderTopColor:c.borderSubtle }]}>
-        <Text style={[jc.fl, { color:c.textMuted, fontFamily:MONO }]}>Weekly</Text>
-        <Text style={[jc.fv, { color:c.textPrimary, fontFamily:MONO }]}>{fmt(wkEarn)}</Text>
-      </View>
-      <View style={jc.foot}>
-        <Text style={[jc.fl, { color:c.textMuted, fontFamily:MONO }]}>Total gross</Text>
-        <Text style={[jc.fv, { color:c.textPrimary, fontFamily:MONO }]}>{fmt(totEarn)}</Text>
-      </View>
-    </View>
-  );
-}
-const jc = StyleSheet.create({
-  card:    { borderWidth:1, borderRadius:8, padding:12, marginBottom:8, position:'relative', paddingTop:14 },
-  title:   { fontSize:11, fontWeight:'600', borderBottomWidth:1, paddingBottom:4, marginBottom:8, letterSpacing:0.5 },
-  pickWrap:{ width:80, borderWidth:1, borderRadius:5, height:32, overflow:'hidden', justifyContent:'center' },
-  foot:    { flexDirection:'row', justifyContent:'space-between', paddingTop:6, marginTop:4 },
-  fl:      { fontSize:11 },
-  fv:      { fontSize:11, fontWeight:'600' },
-  rmBtn:   { position:'absolute', top:8, right:8, width:20, height:20, borderRadius:10, borderWidth:1, alignItems:'center', justifyContent:'center', zIndex:1 },
-});
-
-// ─── ExpenseCard ──────────────────────────────────────────────────────────────
-
-function ExpenseCard({ expense, c, onSave, onComplete }) {
-  const [name,     setName]     = useState(expense.name);
-  const [amount,   setAmount]   = useState(String(expense.amount));
-  const [category, setCategory] = useState(expense.category);
-
-  const save = (ov={}) => onSave(expense.id, {
-    name: ov.name??name, amount: parseFloat(ov.amount??amount)||0, category: ov.category??category,
-  });
-
-  return (
-    <View style={[ec.card, { backgroundColor:c.bgCard, borderColor:c.borderSubtle }]}>
-      <TextInput style={[ec.title, { color:c.textSecondary, borderBottomColor:c.borderSubtle, fontFamily:MONO }]}
-        value={name} onChangeText={setName} onBlur={()=>save()} />
-      <InputRow label="Amount ($)" value={amount} onChange={setAmount} onBlur={()=>save()} c={c} />
-      <View style={[ir.row, { marginBottom:4 }]}>
-        <Text style={[ir.label, { color:c.textMuted, fontFamily:MONO }]}>Category</Text>
-        <View style={[ec.pickWrap, { borderColor:c.borderSubtle, backgroundColor:c.bgBase }]}>
-          <Picker selectedValue={category} onValueChange={val=>{ setCategory(val); save({category:val}); }}
-            style={{ color:c.textPrimary }} dropdownIconColor={c.textMuted}
-            itemStyle={{ fontSize:11, color:c.textPrimary }}>
-            {CATEGORIES.map(cat=><Picker.Item key={cat} label={cat} value={cat} color={c.textPrimary} />)}
-          </Picker>
-        </View>
-      </View>
-      <View style={[ec.foot, { borderTopColor:c.borderSubtle }]}>
-        <View style={[ec.tag, { backgroundColor:c.bgBase, borderColor:c.borderSubtle }]}>
-          <View style={[ec.dot, { backgroundColor:CAT_COLOR[category]||'#aaa' }]} />
-          <Text style={[ec.tagTxt, { color:c.textMuted, fontFamily:MONO }]}>{category}</Text>
-        </View>
-        <Text style={[ec.amt, { color:c.amber, fontFamily:MONO }]}>{fmt(parseFloat(amount)||0)}</Text>
-      </View>
-      <TouchableOpacity style={[ec.paidBtn, { borderColor:c.green, backgroundColor:c.greenGlow }]} onPress={()=>onComplete(expense.id)}>
-        <Text style={[ec.paidTxt, { color:c.green, fontFamily:MONO }]}>✓ Mark Paid</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-const ec = StyleSheet.create({
-  card:    { borderWidth:1, borderRadius:8, padding:12, marginBottom:8 },
-  title:   { fontSize:11, fontWeight:'600', borderBottomWidth:1, paddingBottom:4, marginBottom:8, letterSpacing:0.5 },
-  pickWrap:{ flex:1, maxWidth:130, borderWidth:1, borderRadius:5, height:34, overflow:'hidden' },
-  foot:    { flexDirection:'row', alignItems:'center', justifyContent:'space-between', borderTopWidth:1, paddingTop:8, marginTop:6, gap:8 },
-  tag:     { flexDirection:'row', alignItems:'center', gap:5, borderWidth:1, borderRadius:10, paddingHorizontal:7, paddingVertical:2 },
-  dot:     { width:7, height:7, borderRadius:4 },
-  tagTxt:  { fontSize:9, fontWeight:'600', letterSpacing:0.4 },
-  amt:     { fontSize:13, fontWeight:'600' },
-  paidBtn: { borderWidth:1, borderRadius:20, paddingVertical:5, paddingHorizontal:14, alignSelf:'flex-start', marginTop:8 },
-  paidTxt: { fontSize:10, fontWeight:'600', letterSpacing:0.5 },
-});
-
-// ─── ScheduleCard ─────────────────────────────────────────────────────────────
-
-function ScheduleCard({ schedule, c, onSave, onRemove }) {
-  const [name,         setName]         = useState(schedule.name);
-  const [total,        setTotal]        = useState(String(schedule.total));
-  const [fromSavings,  setFromSavings]  = useState(String(schedule.fromSavings||0));
-  const [interestFree, setInterestFree] = useState(schedule.interestFree);
-  const [apr,          setApr]          = useState(String(schedule.apr||22));
-
-  const save = (ov={}) => onSave(schedule.id, {
-    name: ov.name??name, total: parseFloat(ov.total??total)||0,
-    fromSavings: parseFloat(ov.fromSavings??fromSavings)||0,
-    interestFree: ov.interestFree??interestFree,
-    apr: parseFloat(ov.apr??apr)||22,
-  });
-
-  const owed = Math.max(0, (parseFloat(total)||0) - (parseFloat(fromSavings)||0));
-  const effApr = interestFree ? 0 : (parseFloat(apr)||22);
-
-  return (
-    <View style={[sc.card, { backgroundColor:c.bgCard, borderColor:c.borderSubtle }]}>
-      <View style={sc.header}>
-        <TextInput style={[sc.name, { color:c.textPrimary, fontFamily:MONO, borderBottomColor:c.borderSubtle }]}
-          value={name} onChangeText={setName} onBlur={()=>save()} placeholder="Purchase name" placeholderTextColor={c.textMuted} />
-        <TouchableOpacity onPress={onRemove} hitSlop={{top:8,bottom:8,left:8,right:8}}>
-          <Text style={{ color:c.textMuted, fontSize:16 }}>✕</Text>
-        </TouchableOpacity>
-      </View>
-      <InputRow label="Total cost ($)"   value={total}       onChange={setTotal}       onBlur={()=>save()} c={c} />
-      <InputRow label="From savings ($)" value={fromSavings} onChange={setFromSavings} onBlur={()=>save()} c={c} />
-      <View style={[ir.row, { marginVertical:6 }]}>
-        <Text style={[ir.label, { color:c.textMuted, fontFamily:MONO }]}>Interest-free?</Text>
-        <Switch value={interestFree} onValueChange={val=>{ setInterestFree(val); save({interestFree:val}); }}
-          trackColor={{ false:c.borderSubtle, true:c.blueGlow }} thumbColor={interestFree?c.blue:c.textMuted} />
-      </View>
-      {!interestFree && <InputRow label="APR (%)" value={apr} onChange={setApr} onBlur={()=>save()} c={c} />}
-      <Text style={[sc.owed, { color:c.textMuted, fontFamily:MONO }]}>
-        Owed after savings: <Text style={{ color:c.textPrimary, fontWeight:'600' }}>{fmtD(owed)}</Text>
-      </Text>
-      {/* Table */}
-      <View style={[sc.tableHead, { borderBottomColor:c.borderSubtle }]}>
-        {['Timeline','Monthly','Biweekly','Total','Interest'].map(h=>(
-          <Text key={h} style={[sc.th, { color:c.textMuted, fontFamily:MONO }]}>{h}</Text>
-        ))}
-      </View>
-      {[3,6,12].map(months => {
-        const mPmt = mpCalc(owed, effApr, months);
-        const tot2 = mPmt * months;
-        const int  = tot2 - owed;
-        return (
-          <View key={months} style={[sc.tableRow, { borderBottomColor:c.borderSubtle }]}>
-            <Text style={[sc.td, { color:c.textPrimary, fontFamily:MONO }]}>{months}mo</Text>
-            <Text style={[sc.td, { color:c.textPrimary, fontFamily:MONO }]}>{fmtD(mPmt)}</Text>
-            <Text style={[sc.td, { color:c.textPrimary, fontFamily:MONO }]}>{fmtD(mPmt/2)}</Text>
-            <Text style={[sc.td, { color:c.textPrimary, fontFamily:MONO }]}>{fmtD(tot2)}</Text>
-            <Text style={[sc.td, { color:int<0.5?c.green:c.red, fontFamily:MONO }]}>{int<0.5?'$0.00':fmtD(int)}</Text>
-          </View>
-        );
-      })}
-      <Text style={[sc.note, { color:c.textMuted, fontFamily:MONO }]}>
-        {interestFree ? 'Interest-free — pay before statement due date.' : `At ${apr}% APR — pay before due date to avoid interest.`}
-      </Text>
-    </View>
-  );
-}
-const sc = StyleSheet.create({
-  card:     { borderWidth:1, borderRadius:10, padding:14, marginBottom:10 },
-  header:   { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:8 },
-  name:     { flex:1, fontSize:14, fontWeight:'600', borderBottomWidth:1, paddingBottom:3, marginRight:12 },
-  owed:     { fontSize:11, marginVertical:8 },
-  tableHead:{ flexDirection:'row', borderBottomWidth:1, paddingBottom:5, marginTop:8, marginBottom:3 },
-  tableRow: { flexDirection:'row', borderBottomWidth:1, paddingVertical:5 },
-  th:       { flex:1, fontSize:8, fontWeight:'600', letterSpacing:0.5 },
-  td:       { flex:1, fontSize:11 },
-  note:     { fontSize:10, marginTop:8, lineHeight:16 },
-});
-
-// ─── GoalCard ─────────────────────────────────────────────────────────────────
-
-function GoalCard({ goal, c, onSave, onRemove }) {
-  const [name,     setName]     = useState(goal.name);
-  const [target,   setTarget]   = useState(String(goal.target));
-  const [current,  setCurrent]  = useState(String(goal.current));
-  const [deferred, setDeferred] = useState(goal.deferred);
-
-  const save = (ov={}) => onSave(goal.id, {
-    name: ov.name??name, target: parseFloat(ov.target??target)||0,
-    current: parseFloat(ov.current??current)||0, deferred: ov.deferred??deferred, color: goal.color,
-  });
-
-  const t   = parseFloat(target)||0;
-  const cur = parseFloat(current)||0;
-  const pct = t > 0 ? Math.min(100, (cur/t)*100) : 0;
-  const done = cur >= t && t > 0;
-
-  return (
-    <View style={[gc.card, { backgroundColor:c.bgCard, borderColor:c.borderSubtle, opacity:deferred?0.55:1 }]}>
-      <TouchableOpacity style={[jc.rmBtn, { backgroundColor:c.bgBase, borderColor:c.borderSubtle }]} onPress={onRemove}>
-        <Text style={{ color:c.textMuted, fontSize:13 }}>×</Text>
-      </TouchableOpacity>
-      <TextInput style={[gc.name, { color:c.textMuted, fontFamily:MONO, borderBottomColor:c.borderSubtle }]}
-        value={name} onChangeText={setName} onBlur={()=>save()} placeholder="Goal name" placeholderTextColor={c.textMuted} />
-      <View style={gc.amtRow}>
-        <Text style={[gc.al, { color:c.textMuted, fontFamily:MONO }]}>Target $</Text>
-        <TextInput style={[gc.ai, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:c.textPrimary, fontFamily:MONO }]}
-          value={target} onChangeText={setTarget} onBlur={()=>save()} keyboardType="decimal-pad" />
-      </View>
-      <View style={gc.amtRow}>
-        <Text style={[gc.al, { color:c.textMuted, fontFamily:MONO }]}>Current $</Text>
-        <TextInput style={[gc.ai, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:c.green, fontFamily:MONO }]}
-          value={current} onChangeText={setCurrent} onBlur={()=>save()} keyboardType="decimal-pad" />
-      </View>
-      <Text style={[gc.remaining, { color:c.textMuted, fontFamily:MONO }]}>
-        {t>0 ? `$${Math.max(0,Math.round(t-cur)).toLocaleString()} remaining` : '—'}
-      </Text>
-      <View style={[gc.track, { backgroundColor:c.bgBase }]}>
-        <View style={[gc.fill, { width:`${pct.toFixed(1)}%`, backgroundColor:goal.color }]} />
-      </View>
-      <View style={gc.bottom}>
-        <View style={[gc.pill, {
-          backgroundColor: done?c.greenGlow:deferred?c.amberGlow:c.blueGlow,
-          borderColor:      done?c.green:deferred?c.amber:c.blue,
-        }]}>
-          <Text style={[gc.pillTxt, { color:done?c.green:deferred?c.amber:c.blue, fontFamily:MONO }]}>
-            {done ? 'DONE' : deferred ? 'DEFERRED' : `${pct.toFixed(0)}%`}
-          </Text>
-        </View>
-        <View style={gc.deferRow}>
-          <Text style={[gc.dl, { color:c.textMuted, fontFamily:MONO }]}>Defer</Text>
-          <Switch value={deferred} onValueChange={val=>{ setDeferred(val); save({deferred:val}); }}
-            trackColor={{ false:c.borderSubtle, true:c.amberGlow }} thumbColor={deferred?c.amber:c.textMuted}
-            style={{ transform:[{scaleX:0.8},{scaleY:0.8}] }} />
-        </View>
-      </View>
-    </View>
-  );
-}
-const gc = StyleSheet.create({
-  card:     { borderWidth:1, borderRadius:10, padding:12, marginBottom:8, position:'relative', paddingTop:14 },
-  name:     { fontSize:10, fontWeight:'600', letterSpacing:0.5, borderBottomWidth:1, paddingBottom:3, marginBottom:8 },
-  amtRow:   { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:5 },
-  al:       { fontSize:11 },
-  ai:       { width:90, fontSize:13, fontWeight:'600', paddingHorizontal:7, paddingVertical:3, borderWidth:1, borderRadius:5, textAlign:'right' },
-  remaining:{ fontSize:11, marginTop:2 },
-  track:    { height:5, borderRadius:3, marginTop:9, overflow:'hidden' },
-  fill:     { height:'100%', borderRadius:3 },
-  bottom:   { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginTop:8 },
-  pill:     { borderWidth:1, borderRadius:20, paddingHorizontal:9, paddingVertical:3 },
-  pillTxt:  { fontSize:10, fontWeight:'600', letterSpacing:0.5 },
-  deferRow: { flexDirection:'row', alignItems:'center', gap:4 },
-  dl:       { fontSize:11 },
-});
+const DEF_REPAYMENTS = [
+  { id: 1, name: 'Launch Monitor', total: '4500', paid: '0' },
+];
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
@@ -417,417 +113,611 @@ export default function FinancialPlannerScreen() {
   const { theme } = useTheme();
   const { user }  = useAuth();
   const c = theme.colors;
-  const userRef = useRef(user);
-  useEffect(() => { userRef.current = user; }, [user]);
 
-  // ── Data state ──────────────────────────────────────────
-  const [jobs,              setJobs]              = useState([]);
-  const [expenses,          setExpenses]          = useState([]);
-  const [completedExpenses, setCompletedExpenses] = useState([]);
-  const [schedules,         setSchedules]         = useState([]);
-  const [goals,             setGoals]             = useState([]);
-  const [counters,          setCounters]          = useState({ job:3, exp:9, sched:1, goal:3 });
-  const [periodDismissed,   setPeriodDismissed]   = useState(false);
-  const [projStart,         setProjStart]         = useState(null);
-  const [projEnd,           setProjEnd]           = useState(null);
+  // Goal color palette from theme tokens
+  const GOAL_PALETTE = [c.green, c.teal, c.blue, c.purple, c.amber, c.red];
 
-  // ── UI state ────────────────────────────────────────────
-  const [open,    setOpen]    = useState({ income:true, expenses:true, projection:true, repay:true, goals:true });
-  const [loading, setLoading] = useState(true);
-  const [saved,   setSaved]   = useState(false);
-  const [picker,  setPicker]  = useState({ show:false, target:'start' });
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [loading,    setLoading]    = useState(true);
+  const [saved,      setSaved]      = useState(false);
+  const [periodName, setPeriodName] = useState('Summer 2026');
+  const [vaMode,     setVaMode]     = useState(false);
+  const [totalSaved, setTotalSaved] = useState('0');
+  const [jobs,       setJobs]       = useState(DEF_JOBS);
+  const [goals,      setGoals]      = useState(DEF_GOALS);
+  const [repayments, setRepayments] = useState(DEF_REPAYMENTS);
+  const [archGoals,  setArchGoals]  = useState([]);
+  const [archRep,    setArchRep]    = useState([]);
+  const [idC,        setIdC]        = useState(20);
 
-  // ── Debounced Firestore save ────────────────────────────
-  const saveTimer  = useRef(null);
-  const pendingRef = useRef({});
+  const [goalsArchOpen, setGoalsArchOpen] = useState(false);
+  const [repArchOpen,   setRepArchOpen]   = useState(false);
 
-  const flash = () => { setSaved(true); setTimeout(()=>setSaved(false), 1500); };
+  const [modalVis,  setModalVis]  = useState(false);
+  const [modalType, setModalType] = useState('goal');
+  const [mName,     setMName]     = useState('');
+  const [mAmount,   setMAmount]   = useState('');
+  const [mSaved,    setMSaved]    = useState('0');
 
-  const queueSave = (updates) => {
-    pendingRef.current = { ...pendingRef.current, ...updates };
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
-      const uid = userRef.current?.uid;
-      if (!uid) return;
-      try {
-        await firebase.firestore()
-          .collection('users').doc(uid)
-          .collection('localStorage').doc('data')
-          .set(pendingRef.current, { merge: true });
-        flash();
-        pendingRef.current = {};
-      } catch (err) { console.warn('FP save:', err.message); }
-    }, 600);
+  // ── Refs ───────────────────────────────────────────────────────────────────
+  const jobsRef      = useRef(jobs);
+  const goalsRef     = useRef(goals);
+  const repRef       = useRef(repayments);
+  const archGoalsRef = useRef(archGoals);
+  const archRepRef   = useRef(archRep);
+  const periodRef    = useRef(periodName);
+  const vaModeRef    = useRef(vaMode);
+  const savedRef     = useRef(totalSaved);
+  const idCRef       = useRef(idC);
+  const userRef      = useRef(user);
+  const timerRef     = useRef(null);
+
+  useEffect(() => { jobsRef.current      = jobs;       }, [jobs]);
+  useEffect(() => { goalsRef.current     = goals;      }, [goals]);
+  useEffect(() => { repRef.current       = repayments; }, [repayments]);
+  useEffect(() => { archGoalsRef.current = archGoals;  }, [archGoals]);
+  useEffect(() => { archRepRef.current   = archRep;    }, [archRep]);
+  useEffect(() => { periodRef.current    = periodName; }, [periodName]);
+  useEffect(() => { vaModeRef.current    = vaMode;     }, [vaMode]);
+  useEffect(() => { savedRef.current     = totalSaved; }, [totalSaved]);
+  useEffect(() => { idCRef.current       = idC;        }, [idC]);
+  useEffect(() => { userRef.current      = user;       }, [user]);
+
+  // ── Firestore ──────────────────────────────────────────────────────────────
+
+  const docRef = () => {
+    const uid = userRef.current?.uid;
+    if (!uid) return null;
+    return firebase.firestore().collection('users').doc(uid).collection('localStorage').doc('data');
   };
 
-  // ── Load ────────────────────────────────────────────────
+  const writeAll = async () => {
+    const ref = docRef();
+    if (!ref) return;
+    try {
+      await ref.set({
+        fp2_period:     periodRef.current,
+        fp2_va_mode:    String(vaModeRef.current),
+        fp2_saved:      savedRef.current,
+        fp2_jobs:       JSON.stringify(jobsRef.current),
+        fp2_goals:      JSON.stringify(goalsRef.current),
+        fp2_rep:        JSON.stringify(repRef.current),
+        fp2_arch_goals: JSON.stringify(archGoalsRef.current),
+        fp2_arch_rep:   JSON.stringify(archRepRef.current),
+        fp2_id:         String(idCRef.current),
+      }, { merge: true });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1400);
+    } catch (err) { Alert.alert('Save error', err.message); }
+  };
+
+  const scheduleSave = () => {
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(writeAll, 900);
+  };
+
   useEffect(() => { if (user) load(); }, [user]);
 
   const load = async () => {
     setLoading(true);
     try {
-      const snap = await firebase.firestore()
-        .collection('users').doc(user.uid)
-        .collection('localStorage').doc('data')
-        .get();
-      const d = snap.exists ? snap.data() : {};
-      const j  = d.fp_jobs              ? JSON.parse(d.fp_jobs)              : DEF_JOBS;
-      const e  = d.fp_expenses          ? JSON.parse(d.fp_expenses)          : DEF_EXPENSES;
-      const ce = d.fp_completedExpenses ? JSON.parse(d.fp_completedExpenses) : [];
-      const sc = d.fp_schedules         ? JSON.parse(d.fp_schedules)         : DEF_SCHEDULES;
-      const gl = d.fp_goals             ? JSON.parse(d.fp_goals)             : DEF_GOALS;
-      setJobs(j); setExpenses(e); setCompletedExpenses(ce); setSchedules(sc); setGoals(gl);
-      setCounters({
-        job:   parseInt(d.fp_jobIdCounter   || j.length),
-        exp:   parseInt(d.fp_expIdCounter   || e.length),
-        sched: parseInt(d.fp_schedIdCounter || sc.length),
-        goal:  parseInt(d.fp_goalIdCounter  || gl.length),
-      });
-      setPeriodDismissed(d.fp_periodDismissed === '1');
-      if (d.fp_proj_start) setProjStart(new Date(d.fp_proj_start + 'T12:00:00'));
-      if (d.fp_proj_end)   setProjEnd(new Date(d.fp_proj_end   + 'T12:00:00'));
+      const ref  = docRef();
+      if (!ref) return;
+      const snap = await ref.get();
+      if (!snap.exists) return;
+      const d = snap.data();
+      if (d.fp2_period)     setPeriodName(d.fp2_period);
+      if (d.fp2_va_mode)    setVaMode(d.fp2_va_mode === 'true');
+      if (d.fp2_saved)      setTotalSaved(d.fp2_saved);
+      if (d.fp2_jobs)       setJobs(JSON.parse(d.fp2_jobs));
+      if (d.fp2_goals)      setGoals(JSON.parse(d.fp2_goals));
+      if (d.fp2_rep)        setRepayments(JSON.parse(d.fp2_rep));
+      if (d.fp2_arch_goals) setArchGoals(JSON.parse(d.fp2_arch_goals));
+      if (d.fp2_arch_rep)   setArchRep(JSON.parse(d.fp2_arch_rep));
+      if (d.fp2_id)         setIdC(parseInt(d.fp2_id, 10));
     } catch (err) { Alert.alert('Load error', err.message); }
     finally { setLoading(false); }
   };
 
-  // ── Computed ────────────────────────────────────────────
-  const wkGross  = jobs.reduce((s,j) => s + j.qty * j.rate, 0);
-  const wkNet    = wkGross * (1 - TAX);
-  const moGross  = wkGross * (52/12);
-  const moNet    = wkNet   * (52/12);
-  const totGross = jobs.reduce((s,j) => s + j.qty * j.rate * j.weeks, 0);
-  const totTax   = totGross * TAX;
-  const totNet   = totGross - totTax;
+  // ── Computed ───────────────────────────────────────────────────────────────
 
-  const expTotal = expenses.reduce((s,e) => s + e.amount, 0);
-  const expEquip = expenses.filter(e=>e.category==='Equipment').reduce((s,e)=>s+e.amount,0);
-  const expMisc  = expTotal - expEquip;
-  const catTotals = {};
-  expenses.forEach(e => { catTotals[e.category] = (catTotals[e.category]||0) + e.amount; });
+  const gross      = jobs.reduce((s, j) => s + (parseFloat(j.rate)||0) * (parseFloat(j.hours)||0) * (parseFloat(j.weeks)||0), 0);
+  const fedTax     = calcFedTax(gross);
+  const ficaTax    = gross * 0.0765;
+  const stateTax   = gross * (vaMode ? VA_RATE : PA_RATE);
+  const net        = gross - fedTax - ficaTax - stateTax;
+  const totalRepBal = repayments.reduce((s, r) => s + Math.max(0, (parseFloat(r.total)||0) - (parseFloat(r.paid)||0)), 0);
+  const available  = net - totalRepBal;
 
-  let projData = null;
-  if (projStart && projEnd && projEnd > projStart) {
-    const weeks   = (projEnd - projStart) / 86400000 / 7;
-    const pGross  = wkGross * weeks;
-    const pTax    = pGross * TAX;
-    const pNet    = pGross - pTax;
-    const afterEx = pNet - expTotal;
-    projData = { weeks, pGross, pTax, pNet, afterEx };
-  }
+  const totalSavedNum = parseFloat(totalSaved) || 0;
+  const goalAllocMap  = {};
+  let rem = totalSavedNum;
+  goals.filter(g => !g.deferred).forEach(g => {
+    const alloc = Math.min(parseFloat(g.saved) || 0, rem);
+    rem = Math.max(0, rem - alloc);
+    goalAllocMap[g.id] = alloc;
+  });
+  const totalAllocated = Object.values(goalAllocMap).reduce((s, v) => s + v, 0);
+  const unallocated    = Math.max(0, totalSavedNum - totalAllocated);
 
-  // ── Jobs CRUD ───────────────────────────────────────────
+  const donutSlices = [
+    ...goals
+      .filter(g => !g.deferred)
+      .map((g, i) => ({ name: g.name, val: goalAllocMap[g.id] || 0, color: GOAL_PALETTE[i % GOAL_PALETTE.length] }))
+      .filter(s => s.val > 0),
+    ...(unallocated > 0 ? [{ name: 'Unallocated', val: unallocated, color: c.borderSubtle }] : []),
+  ];
+
+  // ── Job handlers ───────────────────────────────────────────────────────────
+
   const addJob = () => {
-    const id = counters.job;
-    const newJob = { id, name:'New Job', unit:'hrs', rate:15, qty:10, weeks:12 };
-    const updated = [...jobs, newJob];
-    const nc = { ...counters, job: id + 1 };
-    setJobs(updated); setCounters(nc);
-    queueSave({ fp_jobs: JSON.stringify(updated), fp_jobIdCounter: String(nc.job) });
-  };
-  const saveJob = (id, fields) => {
-    const updated = jobs.map(j => j.id === id ? { ...j, ...fields } : j);
-    setJobs(updated); queueSave({ fp_jobs: JSON.stringify(updated) });
-  };
-  const removeJob = (id) => {
-    Alert.alert('Remove job?', '', [
-      { text:'Cancel', style:'cancel' },
-      { text:'Remove', style:'destructive', onPress: () => {
-        const updated = jobs.filter(j=>j.id!==id);
-        setJobs(updated); queueSave({ fp_jobs: JSON.stringify(updated) });
-      }},
-    ]);
+    const id = idCRef.current, newId = id + 1;
+    const newJobs = [...jobsRef.current, { id, name: 'New Job', rate: '15', hours: '20', weeks: '10' }];
+    setJobs(newJobs);  jobsRef.current = newJobs;
+    setIdC(newId);     idCRef.current  = newId;
+    writeAll();
   };
 
-  // ── Expenses CRUD ───────────────────────────────────────
-  const addExpense = () => {
-    const id = counters.exp;
-    const newExp = { id, name:'New Expense', category:'Other', amount:0 };
-    const updated = [...expenses, newExp];
-    const nc = { ...counters, exp: id + 1 };
-    setExpenses(updated); setCounters(nc);
-    queueSave({ fp_expenses: JSON.stringify(updated), fp_expIdCounter: String(nc.exp) });
-  };
-  const saveExpense = (id, fields) => {
-    const updated = expenses.map(e => e.id === id ? { ...e, ...fields } : e);
-    setExpenses(updated); queueSave({ fp_expenses: JSON.stringify(updated) });
-  };
-  const completeExpense = (id) => {
-    const exp = expenses.find(e=>e.id===id);
-    if (!exp) return;
-    const updExp  = expenses.filter(e=>e.id!==id);
-    const updComp = [...completedExpenses, { ...exp, completedAt: new Date().toLocaleDateString() }];
-    setExpenses(updExp); setCompletedExpenses(updComp);
-    queueSave({ fp_expenses: JSON.stringify(updExp), fp_completedExpenses: JSON.stringify(updComp) });
-  };
-  const restoreExpense = (id) => {
-    const exp = completedExpenses.find(e=>e.id===id);
-    if (!exp) return;
-    const { completedAt, ...restored } = exp;
-    const updExp  = [...expenses, restored];
-    const updComp = completedExpenses.filter(e=>e.id!==id);
-    setExpenses(updExp); setCompletedExpenses(updComp);
-    queueSave({ fp_expenses: JSON.stringify(updExp), fp_completedExpenses: JSON.stringify(updComp) });
+  const updateJob = (id, field, val) => {
+    setJobs(prev => prev.map(j => j.id === id ? { ...j, [field]: val } : j));
+    scheduleSave();
   };
 
-  // ── Schedules CRUD ──────────────────────────────────────
-  const addSchedule = () => {
-    const id = counters.sched;
-    const newS = { id, name:'New Purchase', total:1000, fromSavings:0, interestFree:true, apr:22 };
-    const updated = [...schedules, newS];
-    const nc = { ...counters, sched: id + 1 };
-    setSchedules(updated); setCounters(nc);
-    queueSave({ fp_schedules: JSON.stringify(updated), fp_schedIdCounter: String(nc.sched) });
-  };
-  const saveSchedule = (id, fields) => {
-    const updated = schedules.map(s => s.id === id ? { ...s, ...fields } : s);
-    setSchedules(updated); queueSave({ fp_schedules: JSON.stringify(updated) });
-  };
-  const removeSchedule = (id) => {
-    const updated = schedules.filter(s=>s.id!==id);
-    setSchedules(updated); queueSave({ fp_schedules: JSON.stringify(updated) });
+  const deleteJob = (id) => {
+    const newJobs = jobsRef.current.filter(j => j.id !== id);
+    setJobs(newJobs); jobsRef.current = newJobs;
+    writeAll();
   };
 
-  // ── Goals CRUD ──────────────────────────────────────────
-  const addGoal = () => {
-    const id = counters.goal;
-    const newG = { id, name:'New Goal', target:1000, current:0, deferred:false, color:GOAL_COLORS[goals.length%GOAL_COLORS.length] };
-    const updated = [...goals, newG];
-    const nc = { ...counters, goal: id + 1 };
-    setGoals(updated); setCounters(nc);
-    queueSave({ fp_goals: JSON.stringify(updated), fp_goalIdCounter: String(nc.goal) });
-  };
-  const saveGoal = (id, fields) => {
-    const updated = goals.map(g => g.id === id ? { ...g, ...fields } : g);
-    setGoals(updated); queueSave({ fp_goals: JSON.stringify(updated) });
-  };
-  const removeGoal = (id) => {
-    const updated = goals.filter(g=>g.id!==id);
-    setGoals(updated); queueSave({ fp_goals: JSON.stringify(updated) });
+  // ── Goal handlers ──────────────────────────────────────────────────────────
+
+  const updateGoalSaved = (id, val) => {
+    setGoals(prev => prev.map(g => g.id === id ? { ...g, saved: val } : g));
+    scheduleSave();
   };
 
-  // ── Period totals dismiss ───────────────────────────────
-  const dismissPeriod = () => {
-    setPeriodDismissed(true); queueSave({ fp_periodDismissed: '1' });
-  };
-  const restorePeriod = () => {
-    setPeriodDismissed(false); queueSave({ fp_periodDismissed: '0' });
+  const deferGoal = (id) => {
+    const newGoals = goalsRef.current.map(g => g.id === id ? { ...g, deferred: !g.deferred } : g);
+    setGoals(newGoals); goalsRef.current = newGoals;
+    writeAll();
   };
 
-  // ── Date picker ─────────────────────────────────────────
-  const onDateChange = (event, selected) => {
-    if (Platform.OS === 'android') setPicker(p=>({...p, show:false}));
-    if (!selected || event.type === 'dismissed') return;
-    if (picker.target === 'start') {
-      setProjStart(selected);
-      queueSave({ fp_proj_start: fmtDateKey(selected) });
+  const archiveGoal = (id, action) => {
+    const g = goalsRef.current.find(x => x.id === id);
+    if (!g) return;
+    const newArch  = action === 'complete' ? [...archGoalsRef.current, { ...g, status: 'Completed' }] : archGoalsRef.current;
+    const newGoals = goalsRef.current.filter(x => x.id !== id);
+    setGoals(newGoals);        goalsRef.current    = newGoals;
+    setArchGoals(newArch);     archGoalsRef.current = newArch;
+    writeAll();
+  };
+
+  // ── Repayment handlers ─────────────────────────────────────────────────────
+
+  const updateRepayment = (id, field, val) => {
+    setRepayments(prev => prev.map(r => r.id === id ? { ...r, [field]: val } : r));
+    scheduleSave();
+  };
+
+  const archiveRepayment = (id, action) => {
+    const r = repRef.current.find(x => x.id === id);
+    if (!r) return;
+    const newArch = action === 'complete' ? [...archRepRef.current, { ...r, status: 'Paid Off' }] : archRepRef.current;
+    const newRep  = repRef.current.filter(x => x.id !== id);
+    setRepayments(newRep);  repRef.current    = newRep;
+    setArchRep(newArch);    archRepRef.current = newArch;
+    writeAll();
+  };
+
+  // ── Modal ──────────────────────────────────────────────────────────────────
+
+  const openModal = (type) => {
+    setModalType(type);
+    setMName(''); setMAmount(''); setMSaved('0');
+    setModalVis(true);
+  };
+
+  const saveModal = () => {
+    const name   = mName.trim();
+    const amount = parseFloat(mAmount) || 0;
+    if (!name) return Alert.alert('Required', 'Enter a name.');
+    const id = idCRef.current, newId = id + 1;
+    if (modalType === 'goal') {
+      const newGoals = [...goalsRef.current, { id, name, amount: String(amount), saved: mSaved || '0', deferred: false }];
+      setGoals(newGoals); goalsRef.current = newGoals;
     } else {
-      setProjEnd(selected);
-      queueSave({ fp_proj_end: fmtDateKey(selected) });
+      const newRep = [...repRef.current, { id, name, total: String(amount), paid: '0' }];
+      setRepayments(newRep); repRef.current = newRep;
     }
+    setIdC(newId); idCRef.current = newId;
+    setModalVis(false);
+    writeAll();
   };
-  const pickerValue = () => (picker.target === 'start' ? projStart : projEnd) || new Date();
 
-  const toggle = key => setOpen(p=>({...p,[key]:!p[key]}));
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   if (loading) {
-    return (
-      <View style={[s.centered, { backgroundColor:c.bgBase }]}>
-        <ActivityIndicator color={c.blue} size="large" />
-      </View>
-    );
+    return <View style={[s.centered, { backgroundColor: c.bgBase }]}><ActivityIndicator color={c.green} size="large" /></View>;
   }
 
   return (
-    <View style={{ flex:1, backgroundColor:c.bgBase }}>
+    <View style={{ flex: 1, backgroundColor: c.bgBase }}>
       {saved && (
-        <View style={[s.savedBadge, { backgroundColor:c.greenGlow, borderColor:c.green }]}>
-          <Text style={[s.savedText, { color:c.green, fontFamily:MONO }]}>✓ Saved</Text>
+        <View style={[s.savedBadge, { backgroundColor: c.greenGlow, borderColor: c.green }]}>
+          <Text style={[s.savedText, { color: c.green, fontFamily: MONO }]}>✓ Saved</Text>
         </View>
       )}
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
-        {/* ── 1. Income ─────────────────────────────── */}
-        <SecHeader title="Income — Jobs" open={open.income} onToggle={()=>toggle('income')} c={c} />
-        {open.income && (
-          <>
-            {jobs.map(job => (
-              <JobCard key={job.id} job={job} c={c} onSave={saveJob} onRemove={()=>removeJob(job.id)} />
-            ))}
-            <DashedAdd label="+ Add Job" c={c} onPress={addJob} />
+        {/* ── Header ────────────────────────────────────────────────── */}
+        <View style={s.header}>
+          <Text style={[s.pageTitle, { color: c.textPrimary }]}>Financial Planner</Text>
+          <Text style={[s.pageSub,   { color: c.textSecondary }]}>Track income, goals, and expenses</Text>
+          <TextInput
+            style={[s.periodInput, { backgroundColor: c.bgCard, borderColor: c.borderSubtle, color: c.textPrimary, fontFamily: MONO }]}
+            value={periodName}
+            onChangeText={v => { setPeriodName(v); scheduleSave(); }}
+            placeholder="Planning period name" placeholderTextColor={c.textMuted}
+          />
+        </View>
 
-            <Text style={[s.subTitle, { color:c.textMuted, fontFamily:MONO }]}>PAY PERIODS</Text>
-            <View style={s.metRow}>
-              <MetCard label="Weekly Gross"   value={fmt(wkGross)}    c={c} />
-              <MetCard label="Weekly Net"     value={fmt(wkNet)}      color={c.green} sub="FICA + PA" c={c} />
-              <MetCard label="Biweekly Gross" value={fmt(wkGross*2)}  c={c} />
-              <MetCard label="Biweekly Net"   value={fmt(wkNet*2)}    color={c.green} c={c} />
-              <MetCard label="Monthly Gross"  value={fmt(moGross)}    c={c} />
-              <MetCard label="Monthly Net"    value={fmt(moNet)}      color={c.green} c={c} />
+        {/* ── Summary Metrics ────────────────────────────────────────── */}
+        <View style={s.metricsGrid}>
+          <View style={[s.metCard, { backgroundColor: c.greenGlow, borderColor: c.green }]}>
+            <Text style={[s.metLabel, { color: c.green, fontFamily: MONO }]}>GROSS INCOME</Text>
+            <Text style={[s.metValue, { color: c.textPrimary, fontFamily: MONO }]}>{fmtAmt(gross)}</Text>
+            <Text style={[s.metSub, { color: c.textMuted, fontFamily: MONO }]}>all jobs combined</Text>
+          </View>
+          <View style={[s.metCard, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+            <Text style={[s.metLabel, { color: c.textMuted, fontFamily: MONO }]}>NET TAKE-HOME</Text>
+            <Text style={[s.metValue, { color: c.textPrimary, fontFamily: MONO }]}>{fmtAmt(net)}</Text>
+            <Text style={[s.metSub, { color: c.textMuted, fontFamily: MONO }]}>after taxes</Text>
+          </View>
+          <View style={[s.metCard, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+            <Text style={[s.metLabel, { color: c.textMuted, fontFamily: MONO }]}>REPAYMENTS</Text>
+            <Text style={[s.metValue, { color: c.textPrimary, fontFamily: MONO }]}>{fmtAmt(totalRepBal)}</Text>
+            <Text style={[s.metSub, { color: c.textMuted, fontFamily: MONO }]}>remaining balances</Text>
+          </View>
+          <View style={[s.metCard, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+            <Text style={[s.metLabel, { color: c.textMuted, fontFamily: MONO }]}>AVAILABLE</Text>
+            <Text style={[s.metValue, { color: available >= 0 ? c.green : c.red, fontFamily: MONO }]}>{fmtAmt(available)}</Text>
+            <Text style={[s.metSub, { color: c.textMuted, fontFamily: MONO }]}>net minus repayments</Text>
+          </View>
+        </View>
+
+        {/* ── Tax Breakdown ─────────────────────────────────────────── */}
+        <View style={[s.taxCard, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+          <View style={s.taxHeader}>
+            <Text style={[s.sectionLabel, { color: c.textMuted, fontFamily: MONO }]}>TAX BREAKDOWN</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={[s.toggleLbl, { color: vaMode ? c.textMuted : c.textSecondary, fontFamily: MONO }]}>PA</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  const next = !vaModeRef.current;
+                  setVaMode(next); vaModeRef.current = next;
+                  writeAll();
+                }}
+                style={[s.toggleTrack, { backgroundColor: vaMode ? c.greenGlow : c.bgBase, borderColor: vaMode ? c.green : c.borderSubtle }]}
+              >
+                <View style={[s.toggleThumb, { backgroundColor: vaMode ? c.green : c.textMuted, transform: [{ translateX: vaMode ? 19 : 2 }] }]} />
+              </TouchableOpacity>
+              <Text style={[s.toggleLbl, { color: vaMode ? c.textSecondary : c.textMuted, fontFamily: MONO }]}>VA</Text>
             </View>
+          </View>
 
-            {/* Period totals (dismissable) */}
-            {!periodDismissed ? (
-              <View style={[s.card, { backgroundColor:c.bgCard, borderColor:c.borderSubtle }]}>
-                <View style={s.periodHead}>
-                  <Text style={[s.subTitle, { color:c.textMuted, fontFamily:MONO, marginTop:0 }]}>PERIOD TOTALS</Text>
-                  <TouchableOpacity onPress={dismissPeriod}>
-                    <Text style={{ color:c.textMuted, fontSize:16 }}>✕</Text>
+          {[
+            { label: 'Gross Income',                      value: fmtAmt(gross),    color: c.green },
+            { label: 'Federal Income Tax (est.)',         value: '-'+fmtAmt(fedTax),   color: c.red },
+            { label: 'FICA (Social Security + Medicare)', value: '-'+fmtAmt(ficaTax),  color: c.red },
+            { label: vaMode ? 'VA State Tax (5.75%)' : 'PA State Tax (3.07%)', value: '-'+fmtAmt(stateTax), color: c.red },
+          ].map((row, i, arr) => (
+            <View key={i} style={[s.taxRow, { borderBottomColor: c.borderSubtle, borderBottomWidth: i < arr.length - 1 ? 0.5 : 0 }]}>
+              <Text style={[s.taxRowLabel, { color: c.textSecondary, fontFamily: MONO }]}>{row.label}</Text>
+              <Text style={[s.taxRowValue, { color: row.color, fontFamily: MONO }]}>{row.value}</Text>
+            </View>
+          ))}
+
+          <View style={[s.taxDivider, { backgroundColor: c.borderSubtle }]} />
+
+          <View style={s.taxRow}>
+            <Text style={[s.taxRowLabel, { color: c.textPrimary, fontWeight: '600', fontFamily: MONO }]}>Net Take-Home</Text>
+            <Text style={[s.taxRowValue, { color: c.green, fontSize: 16, fontFamily: MONO }]}>{fmtAmt(net)}</Text>
+          </View>
+        </View>
+
+        {/* ══════════════════════════════════════════════════════════ */}
+        {/* JOBS                                                       */}
+        {/* ══════════════════════════════════════════════════════════ */}
+        <View style={s.section}>
+          <View style={s.secRow}>
+            <Text style={[s.sectionLabel, { color: c.textMuted, fontFamily: MONO }]}>INCOME / JOBS</Text>
+            <TouchableOpacity onPress={addJob} style={[s.addBtn, { backgroundColor: c.greenGlow, borderColor: c.green }]}>
+              <Text style={[s.addBtnTxt, { color: c.green, fontFamily: MONO }]}>+ Add Job</Text>
+            </TouchableOpacity>
+          </View>
+
+          {jobs.map(j => {
+            const jobGross = (parseFloat(j.rate)||0) * (parseFloat(j.hours)||0) * (parseFloat(j.weeks)||0);
+            return (
+              <View key={j.id} style={[s.card, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+                <View style={s.cardHeader}>
+                  <TextInput
+                    style={[s.cardTitleInput, { color: c.textPrimary, borderBottomColor: c.borderSubtle, fontFamily: MONO }]}
+                    value={j.name} onChangeText={v => updateJob(j.id, 'name', v)}
+                    placeholder="Job name" placeholderTextColor={c.textMuted}
+                  />
+                  <TouchableOpacity onPress={() => deleteJob(j.id)}>
+                    <Text style={{ color: c.red, fontSize: 14 }}>✕</Text>
                   </TouchableOpacity>
                 </View>
-                <View style={s.metRow}>
-                  <MetCard label="Gross Earnings" value={fmt(totGross)}        c={c} />
-                  <MetCard label="Taxes (10.72%)" value={fmt(totTax)}          color={c.amber} c={c} />
-                  <MetCard label="Take-home"       value={fmt(totNet)}          color={c.green} c={c} />
-                  <MetCard label="+ $1,100 saved"  value={fmt(totNet+SAVINGS)} color={c.green} c={c} />
+                <View style={s.formRow3}>
+                  {[
+                    { label: '$/HR', field: 'rate', val: j.rate },
+                    { label: 'HRS/WK', field: 'hours', val: j.hours },
+                    { label: 'WEEKS', field: 'weeks', val: j.weeks },
+                  ].map(({ label, field, val }) => (
+                    <View key={field} style={{ flex: 1 }}>
+                      <Text style={[s.formLabel, { color: c.textMuted, fontFamily: MONO }]}>{label}</Text>
+                      <TextInput
+                        style={[s.formInput, { backgroundColor: c.bgBase, borderColor: c.borderSubtle, color: c.textPrimary, fontFamily: MONO }]}
+                        value={val} onChangeText={v => updateJob(j.id, field, v)}
+                        keyboardType="decimal-pad" placeholder="0" placeholderTextColor={c.textMuted}
+                      />
+                    </View>
+                  ))}
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                  <Text style={[s.metaLabel, { color: c.textMuted, fontFamily: MONO }]}>Projected gross</Text>
+                  <Text style={[s.metaValue, { color: c.green, fontFamily: MONO }]}>{fmtAmt(jobGross)}</Text>
                 </View>
               </View>
-            ) : (
-              <TouchableOpacity onPress={restorePeriod} style={{ marginTop:6 }}>
-                <Text style={[s.restoreNote, { color:c.textMuted, fontFamily:MONO }]}>Period totals hidden — tap to restore.</Text>
-              </TouchableOpacity>
-            )}
-          </>
-        )}
+            );
+          })}
+        </View>
 
-        {/* ── 2. Fixed Expenses ─────────────────────── */}
-        <SecHeader title="Fixed Expenses" open={open.expenses} onToggle={()=>toggle('expenses')} c={c} />
-        {open.expenses && (
-          <>
-            {expenses.map(exp => (
-              <ExpenseCard key={exp.id} expense={exp} c={c} onSave={saveExpense} onComplete={completeExpense} />
-            ))}
-            <DashedAdd label="+ Add Expense" c={c} onPress={addExpense} />
+        {/* ══════════════════════════════════════════════════════════ */}
+        {/* GOALS                                                      */}
+        {/* ══════════════════════════════════════════════════════════ */}
+        <View style={s.section}>
+          <View style={s.secRow}>
+            <Text style={[s.sectionLabel, { color: c.textMuted, fontFamily: MONO }]}>GOALS</Text>
+            <TouchableOpacity onPress={() => openModal('goal')} style={[s.addBtn, { backgroundColor: c.greenGlow, borderColor: c.green }]}>
+              <Text style={[s.addBtnTxt, { color: c.green, fontFamily: MONO }]}>+ Add Goal</Text>
+            </TouchableOpacity>
+          </View>
 
-            {/* Completed / paid off */}
-            {completedExpenses.length > 0 && (
-              <>
-                <Text style={[s.subTitle, { color:c.textMuted, fontFamily:MONO }]}>COMPLETED / PAID OFF</Text>
-                {completedExpenses.map(exp => (
-                  <View key={exp.id} style={[s.completedRow, { backgroundColor:c.bgCard, borderColor:c.borderSubtle, opacity:0.55 }]}>
-                    <Text style={[s.completedTxt, { color:c.textMuted, fontFamily:MONO }]}>{exp.name} — {fmt(exp.amount)}</Text>
-                    <TouchableOpacity onPress={()=>restoreExpense(exp.id)}>
-                      <Text style={[s.restoreBtn, { color:c.green, fontFamily:MONO }]}>↩ restore</Text>
-                    </TouchableOpacity>
+          {/* Total saved input */}
+          <View style={[s.savedWrap, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+            <Text style={[s.savedWrapLabel, { color: c.textSecondary, fontFamily: MONO }]}>Total saved / allocated</Text>
+            <TextInput
+              style={[s.savedInput, { backgroundColor: c.bgBase, borderColor: c.borderSubtle, color: c.green, fontFamily: MONO }]}
+              value={totalSaved} onChangeText={v => { setTotalSaved(v); scheduleSave(); }}
+              keyboardType="decimal-pad" placeholder="0" placeholderTextColor={c.textMuted}
+            />
+          </View>
+
+          {/* Donut + legend */}
+          {totalSavedNum > 0 && (
+            <View style={[s.donutWrap, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+              <GoalDonut slices={donutSlices} totalSaved={totalSavedNum} c={c} />
+              <View style={{ flex: 1 }}>
+                {donutSlices.map(sl => (
+                  <View key={sl.name} style={s.legendRow}>
+                    <View style={[s.legendDot, { backgroundColor: sl.color }]} />
+                    <Text style={[s.legendName, { color: c.textSecondary, fontFamily: MONO }]} numberOfLines={1}>{sl.name}</Text>
+                    <Text style={[s.legendVal,  { color: c.textPrimary,   fontFamily: MONO }]}>{fmtAmt(sl.val)}</Text>
                   </View>
                 ))}
-              </>
-            )}
-
-            {/* Expense metrics */}
-            <View style={s.metRow}>
-              <MetCard label="Total Expenses" value={fmt(expTotal)} color={c.amber}   c={c} />
-              <MetCard label="Equipment"      value={fmt(expEquip)} color={c.purple}  c={c} />
-              <MetCard label="Recurring/misc" value={fmt(expMisc)}                    c={c} />
-            </View>
-
-            {/* Category bars */}
-            <Text style={[s.subTitle, { color:c.textMuted, fontFamily:MONO }]}>EXPENSE BREAKDOWN</Text>
-            <View style={[s.card, { backgroundColor:c.bgCard, borderColor:c.borderSubtle }]}>
-              {Object.entries(catTotals)
-                .filter(([,v])=>v>0)
-                .sort((a,b)=>b[1]-a[1])
-                .map(([cat,val]) => (
-                  <BarRow key={cat} label={cat} value={fmt(val)} pct={expTotal>0?(val/expTotal)*100:0} color={CAT_COLOR[cat]||'#aaa'} c={c} />
-                ))}
-            </View>
-          </>
-        )}
-
-        {/* ── 3. Earnings Projection ────────────────── */}
-        <SecHeader title="Earnings Projection" open={open.projection} onToggle={()=>toggle('projection')} c={c} />
-        {open.projection && (
-          <View style={[s.card, { backgroundColor:c.bgCard, borderColor:c.borderSubtle }]}>
-            <View style={s.projDateRow}>
-              <View style={{ flex:1, marginRight:8 }}>
-                <FLabel label="From" c={c} />
-                <TouchableOpacity style={[s.dtBtn, { borderColor:c.borderSubtle, backgroundColor:c.bgBase }]}
-                  onPress={()=>setPicker({show:true, target:'start'})}>
-                  <Text style={[s.dtTxt, { color:projStart?c.textPrimary:c.textMuted, fontFamily:MONO }]}>{fmtDateDisp(projStart)}</Text>
-                </TouchableOpacity>
-              </View>
-              <View style={{ flex:1, marginLeft:8 }}>
-                <FLabel label="To" c={c} />
-                <TouchableOpacity style={[s.dtBtn, { borderColor:c.borderSubtle, backgroundColor:c.bgBase }]}
-                  onPress={()=>setPicker({show:true, target:'end'})}>
-                  <Text style={[s.dtTxt, { color:projEnd?c.textPrimary:c.textMuted, fontFamily:MONO }]}>{fmtDateDisp(projEnd)}</Text>
-                </TouchableOpacity>
               </View>
             </View>
+          )}
 
-            {projData ? (
-              <>
-                <View style={s.metRow}>
-                  <MetCard label="Weeks"          value={projData.weeks.toFixed(1)}         c={c} />
-                  <MetCard label="Gross"           value={fmt(projData.pGross)}              c={c} />
-                  <MetCard label="Taxes (10.72%)"  value={fmt(projData.pTax)}  color={c.amber} c={c} />
-                  <MetCard label="Take-home"        value={fmt(projData.pNet)}  color={c.green} c={c} />
-                  <MetCard label="After expenses"   value={fmts(projData.afterEx)} color={projData.afterEx>=0?c.green:c.red} c={c} />
+          {/* Goal cards */}
+          {goals.map((g, gi) => {
+            const color  = GOAL_PALETTE[gi % GOAL_PALETTE.length];
+            const target = parseFloat(g.amount) || 0;
+            const alloc  = goalAllocMap[g.id] || 0;
+            const pct    = target > 0 ? Math.min(100, Math.round((alloc / target) * 100)) : 0;
+            return (
+              <View key={g.id} style={[s.card, { backgroundColor: c.bgCard, borderColor: c.borderSubtle, opacity: g.deferred ? 0.5 : 1 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: g.deferred ? 0 : 8 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+                    {!g.deferred && <View style={[s.goalDot, { backgroundColor: color }]} />}
+                    <Text style={[s.goalName, { color: c.textPrimary, fontFamily: MONO }]} numberOfLines={1}>{g.name}</Text>
+                    {g.deferred && (
+                      <View style={[s.pill, { backgroundColor: c.bgBase, borderColor: c.borderSubtle }]}>
+                        <Text style={[s.pillTxt, { color: c.textMuted, fontFamily: MONO }]}>DEFERRED</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                    <Text style={[s.goalAmt, { color: c.textPrimary, fontFamily: MONO }]}>{fmtAmt(target)}</Text>
+                    <TouchableOpacity onPress={() => deferGoal(g.id)}>
+                      <Text style={{ color: c.textMuted, fontSize: 13 }}>{g.deferred ? '▶' : '⏸'}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => archiveGoal(g.id, 'complete')}>
+                      <Text style={{ color: c.green, fontSize: 13 }}>✓</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => archiveGoal(g.id, 'delete')}>
+                      <Text style={{ color: c.red, fontSize: 13 }}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-                <Text style={[s.projNote, { color:c.textMuted, fontFamily:MONO }]}>
-                  {projData.weeks.toFixed(1)} weeks · {fmt(wkGross)}/wk gross · {fmt(expTotal)} in expenses
-                </Text>
-              </>
-            ) : (
-              <Text style={[s.projNote, { color:c.textMuted, fontFamily:MONO }]}>
-                Set a date range to project earnings from current job cards.
-              </Text>
-            )}
-          </View>
-        )}
-
-        {/* Date picker */}
-        {picker.show && Platform.OS === 'android' && (
-          <DateTimePicker value={pickerValue()} mode="date" display="default" onChange={onDateChange} />
-        )}
-        {picker.show && Platform.OS === 'ios' && (
-          <Modal transparent animationType="slide">
-            <View style={s.modalOverlay}>
-              <View style={[s.modalSheet, { backgroundColor:c.bgCard, borderColor:c.borderSubtle }]}>
-                <TouchableOpacity onPress={()=>setPicker(p=>({...p,show:false}))} style={s.doneBtn}>
-                  <Text style={[s.doneTxt, { color:c.blue, fontFamily:MONO }]}>Done</Text>
-                </TouchableOpacity>
-                <DateTimePicker value={pickerValue()} mode="date" display="spinner" onChange={onDateChange} textColor={c.textPrimary} />
+                {!g.deferred && (
+                  <>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <Text style={[s.metaLabel, { color: c.textMuted, fontFamily: MONO }]}>Allocated:</Text>
+                      <TextInput
+                        style={[s.goalSavedInput, { backgroundColor: c.bgBase, borderColor: c.borderSubtle, color: c.green, fontFamily: MONO }]}
+                        value={g.saved} onChangeText={v => updateGoalSaved(g.id, v)}
+                        keyboardType="decimal-pad" placeholder="0" placeholderTextColor={c.textMuted}
+                      />
+                      <Text style={[s.metaLabel, { color: c.textMuted, fontFamily: MONO }]}>{pct}% of goal</Text>
+                    </View>
+                    <View style={[s.progressTrack, { backgroundColor: c.bgBase }]}>
+                      <View style={[s.progressFill, { width: `${pct}%`, backgroundColor: color }]} />
+                    </View>
+                  </>
+                )}
               </View>
+            );
+          })}
+
+          {/* Goals archive */}
+          <TouchableOpacity onPress={() => setGoalsArchOpen(v => !v)}
+            style={[s.archiveBtn, { borderColor: c.borderSubtle }]}>
+            <Text style={[s.archiveBtnTxt, { color: c.textMuted, fontFamily: MONO }]}>Completed / Archived</Text>
+            <Text style={{ color: c.textMuted, fontSize: 10 }}>{goalsArchOpen ? '▲' : '▼'}</Text>
+          </TouchableOpacity>
+          {goalsArchOpen && archGoals.map(g => (
+            <View key={g.id} style={[s.archiveItem, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+              <Text style={[s.archiveName, { color: c.textSecondary, fontFamily: MONO }]}>{g.name} · {g.status}</Text>
+              <Text style={[s.archiveAmt,  { color: c.textSecondary, fontFamily: MONO }]}>{fmtAmt(parseFloat(g.amount)||0)}</Text>
             </View>
-          </Modal>
-        )}
+          ))}
+        </View>
 
-        {/* ── 4. Repayment Schedules ─────────────────── */}
-        <SecHeader title="Purchase Repayment Schedules" open={open.repay} onToggle={()=>toggle('repay')} c={c} />
-        {open.repay && (
-          <>
-            {schedules.map(sched => (
-              <ScheduleCard key={sched.id} schedule={sched} c={c} onSave={saveSchedule} onRemove={()=>removeSchedule(sched.id)} />
-            ))}
-            <DashedAdd label="+ Add Purchase Schedule" c={c} onPress={addSchedule} />
-          </>
-        )}
-
-        {/* ── 5. Goals & Progress ───────────────────── */}
-        <SecHeader
-          title="Goals & Progress"
-          open={open.goals}
-          onToggle={()=>toggle('goals')}
-          c={c}
-          rightEl={
-            <TouchableOpacity style={[s.addGoalBtn, { backgroundColor:c.greenGlow, borderColor:c.green }]} onPress={e=>{ e.stopPropagation?.(); addGoal(); }}>
-              <Text style={[s.addGoalTxt, { color:c.green, fontFamily:MONO }]}>+ Goal</Text>
+        {/* ══════════════════════════════════════════════════════════ */}
+        {/* REPAYMENT SCHEDULES                                        */}
+        {/* ══════════════════════════════════════════════════════════ */}
+        <View style={s.section}>
+          <View style={s.secRow}>
+            <Text style={[s.sectionLabel, { color: c.textMuted, fontFamily: MONO }]}>REPAYMENT SCHEDULES</Text>
+            <TouchableOpacity onPress={() => openModal('repayment')} style={[s.addBtn, { backgroundColor: c.greenGlow, borderColor: c.green }]}>
+              <Text style={[s.addBtnTxt, { color: c.green, fontFamily: MONO }]}>+ Add</Text>
             </TouchableOpacity>
-          }
-        />
-        {open.goals && (
-          <>
-            {goals.map(goal => (
-              <GoalCard key={goal.id} goal={goal} c={c} onSave={saveGoal} onRemove={()=>removeGoal(goal.id)} />
-            ))}
-            {goals.length === 0 && (
-              <DashedAdd label="+ Add Goal" c={c} onPress={addGoal} />
-            )}
-          </>
-        )}
+          </View>
+
+          {repayments.map(r => {
+            const total     = parseFloat(r.total) || 0;
+            const paid      = parseFloat(r.paid)  || 0;
+            const remaining = Math.max(0, total - paid);
+            const pct       = total > 0 ? Math.min(100, Math.round((paid / total) * 100)) : 0;
+            const mo3       = remaining / 3;
+            const mo6       = remaining / 6;
+            const mo12      = remaining / 12;
+            return (
+              <View key={r.id} style={[s.card, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+                <View style={s.cardHeader}>
+                  <TextInput
+                    style={[s.cardTitleInput, { color: c.textPrimary, borderBottomColor: c.borderSubtle, fontFamily: MONO }]}
+                    value={r.name} onChangeText={v => updateRepayment(r.id, 'name', v)}
+                    placeholder="Loan name" placeholderTextColor={c.textMuted}
+                  />
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity onPress={() => archiveRepayment(r.id, 'complete')}>
+                      <Text style={{ color: c.green, fontSize: 13 }}>✓</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => archiveRepayment(r.id, 'delete')}>
+                      <Text style={{ color: c.red, fontSize: 13 }}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <View style={s.formRow2}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.formLabel, { color: c.textMuted, fontFamily: MONO }]}>TOTAL ($)</Text>
+                    <TextInput
+                      style={[s.formInput, { backgroundColor: c.bgBase, borderColor: c.borderSubtle, color: c.textPrimary, fontFamily: MONO }]}
+                      value={r.total} onChangeText={v => updateRepayment(r.id, 'total', v)}
+                      keyboardType="decimal-pad" placeholder="0" placeholderTextColor={c.textMuted}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.formLabel, { color: c.textMuted, fontFamily: MONO }]}>PAID ($)</Text>
+                    <TextInput
+                      style={[s.formInput, { backgroundColor: c.bgBase, borderColor: c.borderSubtle, color: c.textPrimary, fontFamily: MONO }]}
+                      value={r.paid} onChangeText={v => updateRepayment(r.id, 'paid', v)}
+                      keyboardType="decimal-pad" placeholder="0" placeholderTextColor={c.textMuted}
+                    />
+                  </View>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <Text style={[s.metaLabel, { color: c.textMuted, fontFamily: MONO }]}>Remaining: {fmtAmt(remaining)}</Text>
+                  <Text style={[s.metaLabel, { color: c.textMuted, fontFamily: MONO }]}>{pct}% paid</Text>
+                </View>
+                <View style={[s.progressTrack, { backgroundColor: c.bgBase, marginBottom: 10 }]}>
+                  <View style={[s.progressFill, { width: `${pct}%`, backgroundColor: c.green }]} />
+                </View>
+                <View style={s.monthlyGrid}>
+                  {[['3 MO', mo3], ['6 MO', mo6], ['12 MO', mo12]].map(([label, val]) => (
+                    <View key={label} style={[s.monthlyPill, { backgroundColor: c.bgBase, borderColor: c.borderSubtle }]}>
+                      <Text style={[s.monthlyLabel, { color: c.textMuted, fontFamily: MONO }]}>{label}</Text>
+                      <Text style={[s.monthlyValue, { color: c.green,     fontFamily: MONO }]}>{fmtDec(val)}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            );
+          })}
+
+          {/* Repayments archive */}
+          <TouchableOpacity onPress={() => setRepArchOpen(v => !v)}
+            style={[s.archiveBtn, { borderColor: c.borderSubtle }]}>
+            <Text style={[s.archiveBtnTxt, { color: c.textMuted, fontFamily: MONO }]}>Paid Off / Archived</Text>
+            <Text style={{ color: c.textMuted, fontSize: 10 }}>{repArchOpen ? '▲' : '▼'}</Text>
+          </TouchableOpacity>
+          {repArchOpen && archRep.map(r => (
+            <View key={r.id} style={[s.archiveItem, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+              <Text style={[s.archiveName, { color: c.textSecondary, fontFamily: MONO }]}>{r.name} · {r.status}</Text>
+              <Text style={[s.archiveAmt,  { color: c.textSecondary, fontFamily: MONO }]}>{fmtAmt(parseFloat(r.total)||0)}</Text>
+            </View>
+          ))}
+        </View>
 
       </ScrollView>
+
+      {/* ── Add Modal ──────────────────────────────────────────────── */}
+      <Modal visible={modalVis} transparent animationType="fade" onRequestClose={() => setModalVis(false)}>
+        <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setModalVis(false)}>
+          <TouchableOpacity activeOpacity={1}>
+            <View style={[s.modalBox, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+              <Text style={[s.modalTitle, { color: c.textPrimary, fontFamily: MONO }]}>
+                {modalType === 'goal' ? 'Add Goal' : 'Add Repayment'}
+              </Text>
+
+              <Text style={[s.formLabel, { color: c.textMuted, fontFamily: MONO }]}>
+                {modalType === 'goal' ? 'GOAL NAME' : 'LOAN / ITEM NAME'}
+              </Text>
+              <TextInput
+                style={[s.formInput, { backgroundColor: c.bgBase, borderColor: c.borderSubtle, color: c.textPrimary, fontFamily: MONO, marginBottom: 10 }]}
+                value={mName} onChangeText={setMName}
+                placeholder={modalType === 'goal' ? 'e.g. Roth IRA' : 'e.g. Laptop'}
+                placeholderTextColor={c.textMuted} autoFocus
+              />
+
+              <Text style={[s.formLabel, { color: c.textMuted, fontFamily: MONO }]}>TARGET AMOUNT ($)</Text>
+              <TextInput
+                style={[s.formInput, { backgroundColor: c.bgBase, borderColor: c.borderSubtle, color: c.textPrimary, fontFamily: MONO, marginBottom: 10 }]}
+                value={mAmount} onChangeText={setMAmount}
+                keyboardType="decimal-pad" placeholder="0" placeholderTextColor={c.textMuted}
+              />
+
+              {modalType === 'goal' && (
+                <>
+                  <Text style={[s.formLabel, { color: c.textMuted, fontFamily: MONO }]}>ALREADY ALLOCATED ($)</Text>
+                  <TextInput
+                    style={[s.formInput, { backgroundColor: c.bgBase, borderColor: c.borderSubtle, color: c.textPrimary, fontFamily: MONO, marginBottom: 10 }]}
+                    value={mSaved} onChangeText={setMSaved}
+                    keyboardType="decimal-pad" placeholder="0" placeholderTextColor={c.textMuted}
+                  />
+                </>
+              )}
+
+              <View style={s.modalActions}>
+                <TouchableOpacity onPress={() => setModalVis(false)}
+                  style={[s.modalBtn, { backgroundColor: c.bgBase, borderColor: c.borderSubtle }]}>
+                  <Text style={[s.modalBtnTxt, { color: c.textSecondary, fontFamily: MONO }]}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={saveModal}
+                  style={[s.modalBtn, { backgroundColor: c.greenGlow, borderColor: c.green }]}>
+                  <Text style={[s.modalBtnTxt, { color: c.green, fontFamily: MONO }]}>Add</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -835,26 +725,85 @@ export default function FinancialPlannerScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  centered:     { flex:1, alignItems:'center', justifyContent:'center' },
-  scroll:       { padding:14, paddingBottom:60 },
-  metRow:       { flexDirection:'row', flexWrap:'wrap', marginVertical:4 },
-  card:         { borderWidth:1, borderRadius:10, padding:14, marginBottom:6 },
-  subTitle:     { fontSize:9, fontWeight:'600', letterSpacing:1, marginTop:14, marginBottom:6 },
-  periodHead:   { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:8 },
-  restoreNote:  { fontSize:11, textDecorationLine:'underline' },
-  completedRow: { flexDirection:'row', alignItems:'center', justifyContent:'space-between', borderWidth:1, borderRadius:6, paddingHorizontal:10, paddingVertical:6, marginBottom:4 },
-  completedTxt: { fontSize:12, textDecorationLine:'line-through' },
-  restoreBtn:   { fontSize:10, fontWeight:'600' },
-  projDateRow:  { flexDirection:'row', alignItems:'flex-end' },
-  dtBtn:        { borderWidth:1, borderRadius:6, paddingHorizontal:10, paddingVertical:8 },
-  dtTxt:        { fontSize:12 },
-  projNote:     { fontSize:10, lineHeight:16, marginTop:8 },
-  addGoalBtn:   { borderWidth:1, borderRadius:14, paddingHorizontal:10, paddingVertical:3 },
-  addGoalTxt:   { fontSize:10, fontWeight:'600' },
-  savedBadge:   { position:'absolute', bottom:16, right:16, zIndex:99, borderWidth:1, borderRadius:20, paddingHorizontal:14, paddingVertical:5 },
-  savedText:    { fontSize:11, fontWeight:'600' },
-  modalOverlay: { flex:1, justifyContent:'flex-end', backgroundColor:'rgba(0,0,0,0.4)' },
-  modalSheet:   { borderTopWidth:1, borderTopLeftRadius:16, borderTopRightRadius:16, paddingBottom:24 },
-  doneBtn:      { alignItems:'flex-end', paddingHorizontal:20, paddingTop:14, paddingBottom:4 },
-  doneTxt:      { fontSize:15, fontWeight:'600' },
+  centered:   { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  scroll:     { padding: 16, paddingBottom: 60 },
+  savedBadge: { position: 'absolute', bottom: 16, right: 16, zIndex: 99, borderWidth: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 5 },
+  savedText:  { fontSize: 11, fontWeight: '600' },
+
+  header:      { marginBottom: 20 },
+  pageTitle:   { fontSize: 26, fontWeight: '700', letterSpacing: -0.5 },
+  pageSub:     { fontSize: 13, marginTop: 4, marginBottom: 10 },
+  periodInput: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, fontSize: 14, marginTop: 4 },
+
+  metricsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
+  metCard:     { width: '47%', flexGrow: 1, borderWidth: 1, borderRadius: 12, padding: 14 },
+  metLabel:    { fontSize: 10, fontWeight: '600', letterSpacing: 0.6, marginBottom: 6 },
+  metValue:    { fontSize: 22, fontWeight: '700', letterSpacing: -0.5 },
+  metSub:      { fontSize: 10, marginTop: 3 },
+
+  taxCard:    { borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 20 },
+  taxHeader:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  toggleLbl:  { fontSize: 12, fontWeight: '500' },
+  toggleTrack:{ width: 40, height: 22, borderWidth: 1, borderRadius: 11, justifyContent: 'center' },
+  toggleThumb:{ width: 16, height: 16, borderRadius: 8, position: 'absolute', top: 3 },
+  taxRow:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 5 },
+  taxRowLabel:{ fontSize: 13 },
+  taxRowValue:{ fontSize: 13, fontWeight: '500' },
+  taxDivider: { height: 0.5, marginVertical: 6 },
+
+  section:      { marginBottom: 24 },
+  secRow:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  sectionLabel: { fontSize: 11, fontWeight: '600', letterSpacing: 0.8 },
+  addBtn:       { borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 },
+  addBtnTxt:    { fontSize: 12, fontWeight: '600' },
+
+  card:          { borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10 },
+  cardHeader:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  cardTitleInput:{ fontSize: 14, fontWeight: '600', flex: 1, marginRight: 10, borderBottomWidth: 0.5, paddingBottom: 2 },
+
+  formRow3: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  formRow2: { flexDirection: 'row', gap: 10, marginBottom: 8 },
+  formLabel:{ fontSize: 10, fontWeight: '500', letterSpacing: 0.5, marginBottom: 4 },
+  formInput:{ borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 7, fontSize: 13 },
+
+  metaLabel: { fontSize: 11 },
+  metaValue: { fontSize: 14, fontWeight: '600' },
+
+  savedWrap:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 10 },
+  savedWrapLabel: { fontSize: 12 },
+  savedInput:     { borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6, fontSize: 13, textAlign: 'right', width: 110 },
+
+  donutWrap: { flexDirection: 'row', alignItems: 'center', gap: 16, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10 },
+  legendRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 5 },
+  legendDot: { width: 8, height: 8, borderRadius: 4, flexShrink: 0 },
+  legendName:{ flex: 1, fontSize: 11 },
+  legendVal: { fontSize: 11, fontWeight: '600' },
+
+  goalDot:        { width: 9, height: 9, borderRadius: 5, flexShrink: 0 },
+  goalName:       { fontSize: 14, fontWeight: '600', flex: 1 },
+  goalAmt:        { fontSize: 13, fontWeight: '600' },
+  goalSavedInput: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, fontSize: 12, textAlign: 'right', width: 90 },
+  pill:           { borderWidth: 1, borderRadius: 20, paddingHorizontal: 7, paddingVertical: 2 },
+  pillTxt:        { fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
+
+  progressTrack: { height: 5, borderRadius: 3, overflow: 'hidden' },
+  progressFill:  { height: '100%', borderRadius: 3 },
+
+  monthlyGrid:  { flexDirection: 'row', gap: 6 },
+  monthlyPill:  { flex: 1, borderWidth: 1, borderRadius: 6, padding: 7, alignItems: 'center' },
+  monthlyLabel: { fontSize: 10, letterSpacing: 0.4, marginBottom: 3 },
+  monthlyValue: { fontSize: 13, fontWeight: '600' },
+
+  archiveBtn:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderRadius: 8, padding: 10, marginTop: 6 },
+  archiveBtnTxt: { fontSize: 12 },
+  archiveItem:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderRadius: 8, padding: 10, marginTop: 6, opacity: 0.5 },
+  archiveName:   { fontSize: 12 },
+  archiveAmt:    { fontSize: 12, fontWeight: '600' },
+
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', padding: 20 },
+  modalBox:     { width: 340, borderWidth: 1, borderRadius: 16, padding: 20 },
+  modalTitle:   { fontSize: 16, fontWeight: '600', marginBottom: 14 },
+  modalActions: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  modalBtn:     { flex: 1, borderWidth: 1, borderRadius: 8, padding: 10, alignItems: 'center' },
+  modalBtnTxt:  { fontSize: 13, fontWeight: '500' },
 });
