@@ -370,6 +370,7 @@ export default function ExpenseLogScreen() {
   const catTotals   = {};
   entries.forEach(e => { catTotals[e.cat] = (catTotals[e.cat] || 0) + (e.amt || 0); });
   const catSorted   = Object.entries(catTotals).sort((a, b) => b[1] - a[1]);
+  const catTotal    = catSorted.reduce((s, [, v]) => s + v, 0);
 
   const monthlyBurn = subs.reduce((acc, s) => acc + monthlyEq(s), 0);
   const annualBurn  = monthlyBurn * 12;
@@ -612,7 +613,7 @@ export default function ExpenseLogScreen() {
                 {/* Bar rows */}
                 <View style={{ marginTop: 10 }}>
                   {catSorted.map(([cat, val]) => {
-                    const pct   = total > 0 ? Math.min(100, (val / total) * 100) : 0;
+                    const pct   = catTotal > 0 ? Math.min(100, (val / catTotal) * 100) : 0;
                     const color = CAT_COLOR[cat] || '#aaa';
                     return (
                       <View key={cat} style={s.barRow}>

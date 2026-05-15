@@ -699,8 +699,8 @@ const s = StyleSheet.create({
   savedText:   { fontSize:11, fontWeight:'600' },
 
   // Modal
-  modalOverlay:{ flex:1, justifyContent:'flex-end', backgroundColor:'rgba(0,0,0,0.45)' },
-  modalSheet:  { flex:1, marginTop:72, borderTopLeftRadius:20, borderTopRightRadius:20, borderTopWidth:1, borderLeftWidth:1, borderRightWidth:1, overflow:'hidden' },
+  modalOverlay:{ flex:1, justifyContent:'center', backgroundColor:'rgba(0,0,0,0.45)', padding:20 },
+  modalSheet:  { maxHeight:'90%', borderRadius:20, borderWidth:1, overflow:'hidden' },
   modalHeader: { flexDirection:'row', alignItems:'center', justifyContent:'space-between', padding:16, borderBottomWidth:1 },
   modalTitle:  { fontSize:15, fontWeight:'600', flex:1, marginRight:10 },
   closeBtn:    { width:28, height:28, borderRadius:14, borderWidth:1, alignItems:'center', justifyContent:'center' },

@@ -139,6 +139,7 @@ function JobRow({ job, c, onSave, onRemove }) {
         <Picker
           selectedValue={unit}
           onValueChange={val => { setUnit(val); save({ unit: val }); }}
+          mode="dropdown"
           style={{ color: c.textPrimary, height: 36 }}
           dropdownIconColor={c.textMuted}
           itemStyle={{ fontSize: 11, color: c.textPrimary }}
@@ -398,6 +399,7 @@ export default function ShiftLogScreen() {
               <Picker
                 selectedValue={formJobId}
                 onValueChange={setFormJobId}
+                mode="dropdown"
                 style={{ color: c.textPrimary }}
                 dropdownIconColor={c.textMuted}
                 itemStyle={{ fontSize: 13, color: c.textPrimary, fontFamily: MONO }}
