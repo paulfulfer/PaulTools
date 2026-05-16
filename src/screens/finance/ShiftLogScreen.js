@@ -61,19 +61,19 @@ function weekGross(shifts, jobs) {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function MetCard({ label, value, sub, color, c }) {
+function MetCard({ label, value, sub, color, c, fontSize }) {
   return (
     <View style={[mc.card, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
       <Text style={[mc.label, { color: c.textMuted, fontFamily: MONO }]}>{label.toUpperCase()}</Text>
-      <Text style={[mc.value, { color, fontFamily: MONO }]}>{value}</Text>
-      <Text style={[mc.sub, { color: c.textMuted, fontFamily: MONO }]}>{sub}</Text>
+      <Text style={[mc.value, { color, fontFamily: MONO, fontSize: fontSize ?? 18 }]}>{value}</Text>
+      {!!sub && <Text style={[mc.sub, { color: c.textMuted, fontFamily: MONO }]}>{sub}</Text>}
     </View>
   );
 }
 const mc = StyleSheet.create({
   card:  { flex: 1, minWidth: '45%', borderWidth: 1, borderRadius: 8, padding: 10, margin: 3 },
   label: { fontSize: 9, letterSpacing: 0.8, marginBottom: 3 },
-  value: { fontSize: 18, fontWeight: '600', letterSpacing: -0.3 },
+  value: { fontWeight: '600', letterSpacing: -0.3 },
   sub:   { fontSize: 9, marginTop: 2 },
 });
 
@@ -239,6 +239,9 @@ export default function ShiftLogScreen() {
   // ── Metrics ─────────────────────────────────────────────
   const totalHours = shifts.reduce((s, x) => s + (x.hours || 0), 0);
   const totalGross = shifts.reduce((s, x) => s + (x.hours || 0) * getWage(jobs, x.jobId), 0);
+  // FICA 7.65% + PA state 3.07% + Lancaster local 1.0% + federal ~12% ≈ 23.72%
+  const TAX_RATE  = 0.2372;
+  const afterTax  = totalGross * (1 - TAX_RATE);
 
   // ── Date/time picker ────────────────────────────────────
   const openPicker = (target, mode) => setPicker({ show: true, mode, target });
@@ -374,10 +377,30 @@ export default function ShiftLogScreen() {
 
         {/* ── Metrics ─────────────────────────────────── */}
         <View style={s.metRow}>
-          <MetCard label="Total Hours"  value={totalHours.toFixed(1)}   sub="all jobs"   color={c.blue}        c={c} />
-          <MetCard label="Total Gross"  value={fmt$(totalGross)}         sub="before tax" color={c.green}       c={c} />
-          <MetCard label="Shifts"       value={String(shifts.length)}    sub="all time"   color={c.textPrimary}  c={c} />
-          <MetCard label="This Week"    value={fmt$(weekGross(shifts, jobs))} sub="gross"  color={c.amber}       c={c} />
+          <MetCard
+            label="Hours & Shifts"
+            value={`${totalHours.toFixed(1)} hrs  ·  ${shifts.length} shifts`}
+            sub="all time"
+            color={c.blue}
+            fontSize={14}
+            c={c}
+          />
+          <MetCard
+            label="Gross Earnings"
+            value={`${fmt$(totalGross)} total  ·  ${fmt$(weekGross(shifts, jobs))} this week`}
+            sub="before tax"
+            color={c.green}
+            fontSize={13}
+            c={c}
+          />
+          <MetCard
+            label="After-Tax Est."
+            value={`${fmt$(afterTax)} est. take-home`}
+            sub="~23.7% effective rate"
+            color={c.teal}
+            fontSize={14}
+            c={c}
+          />
         </View>
 
         {/* ── Per-Job Breakdown ───────────────────────── */}
