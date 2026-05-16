@@ -239,9 +239,14 @@ export default function ShiftLogScreen() {
   // ── Metrics ─────────────────────────────────────────────
   const totalHours = shifts.reduce((s, x) => s + (x.hours || 0), 0);
   const totalGross = shifts.reduce((s, x) => s + (x.hours || 0) * getWage(jobs, x.jobId), 0);
-  // FICA 7.65% + PA state 3.07% + Lancaster local 1.0% + federal ~12% ≈ 23.72%
-  const TAX_RATE  = 0.2372;
-  const afterTax  = totalGross * (1 - TAX_RATE);
+  const JOB_TAX = { 'HE&R CO': 0.13, 'SESP RA': 0.05, 'SESP (Extra)': 0.05, 'Honors': 0.05 };
+  const DEFAULT_TAX = 0.10;
+  const afterTax = shifts.reduce((sum, x) => {
+    const gross = (x.hours || 0) * getWage(jobs, x.jobId);
+    const title = jobs.find(j => j.id === x.jobId)?.title || '';
+    const rate  = JOB_TAX[title] ?? DEFAULT_TAX;
+    return sum + gross * (1 - rate);
+  }, 0);
 
   // ── Date/time picker ────────────────────────────────────
   const openPicker = (target, mode) => setPicker({ show: true, mode, target });
@@ -383,7 +388,7 @@ export default function ShiftLogScreen() {
           <MetCard label="This Week"    value={fmt$(weekGross(shifts, jobs))} sub="gross"      color={c.amber}       c={c} />
         </View>
         <View style={s.metRow}>
-          <MetCard label="Est. Take-Home" value={fmt$(afterTax)} sub="~23.7% effective rate" color={c.teal} c={c} />
+          <MetCard label="Est. Take-Home" value={fmt$(afterTax)} sub="per-job rates applied" color={c.teal} c={c} />
         </View>
 
         {/* ── Per-Job Breakdown ───────────────────────── */}
