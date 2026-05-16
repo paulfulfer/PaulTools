@@ -188,6 +188,7 @@ export default function AddCourseScreen({ navigation }) {
       if (!name.trim()) { Alert.alert('Required', 'Course name is required.'); return false; }
     }
     if (step === 2) {
+      if (tees.length === 0)              { Alert.alert('Required', 'Add at least one tee box.'); return false; }
       if (tees.some(t => !t.name.trim())) { Alert.alert('Required', 'All tee boxes need a name.'); return false; }
     }
     return true;

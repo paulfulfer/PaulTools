@@ -729,6 +729,24 @@ export default function RoundTrackerScreen({ navigation }) {
               />
             </View>
             <ScrollView keyboardShouldPersistTaps="handled">
+              {/* Empty state — no courses saved yet */}
+              {myCourses.length === 0 && courseSearch.trim().length === 0 && (
+                <View style={{ alignItems:'center', paddingVertical:32, paddingHorizontal:20 }}>
+                  <Text style={{ fontSize:32, marginBottom:10 }}>⛳</Text>
+                  <Text style={[{ color:c.textPrimary, fontFamily:'Inter_600SemiBold', fontSize:15, marginBottom:6, textAlign:'center' }]}>
+                    No courses saved yet
+                  </Text>
+                  <Text style={[{ color:c.textMuted, fontFamily:MONO, fontSize:12, textAlign:'center', lineHeight:18 }]}>
+                    Type a name above to log manually, or add courses in Course Manager to link rounds to them.
+                  </Text>
+                  <TouchableOpacity
+                    style={{ marginTop:16, borderWidth:1, borderColor:c.teal, backgroundColor:c.tealGlow, borderRadius:20, paddingVertical:9, paddingHorizontal:18 }}
+                    onPress={() => { setShowCoursePicker(false); setModalMode(null); navigation.navigate('CourseList'); }}
+                  >
+                    <Text style={[{ color:c.teal, fontFamily:MONO, fontWeight:'700', fontSize:13 }]}>Open Course Manager →</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
               {/* Saved courses */}
               {myCourses
                 .filter(co => !courseSearch || co.name?.toLowerCase().includes(courseSearch.toLowerCase()))

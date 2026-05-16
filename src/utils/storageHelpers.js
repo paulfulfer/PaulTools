@@ -14,7 +14,7 @@ export async function uploadCoursePhoto(userId, courseId, type, imageUri) {
   const blob = await response.blob();
 
   await ref.put(blob, { contentType: 'image/jpeg' });
-  return ref.getDownloadURL();
+  return await ref.getDownloadURL();
 }
 
 /**
