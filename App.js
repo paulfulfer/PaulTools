@@ -1,5 +1,6 @@
 import React from 'react';
-import { View } from 'react-native';
+import { View, Text } from 'react-native';
+import * as Updates from 'expo-updates';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import {
@@ -35,6 +36,10 @@ function AppRoot() {
     return <View style={{ flex: 1, backgroundColor: theme.colors.bgBase }} />;
   }
 
+  const updateLabel = Updates.updateId
+    ? `upd: ${Updates.updateId.slice(0, 8)}`
+    : 'upd: local';
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bgBase, overflow: 'hidden' }}>
       <BackgroundOrbs />
@@ -42,6 +47,15 @@ function AppRoot() {
         <StatusBarController />
         <RootNavigator />
       </AuthProvider>
+      {/* ── Temporary OTA update indicator — remove after confirming delivery ── */}
+      <Text style={{
+        position: 'absolute', bottom: 8, alignSelf: 'center',
+        color: 'rgba(255,255,255,0.4)', fontSize: 10,
+        fontFamily: 'Inter_400Regular', letterSpacing: 0.5,
+        pointerEvents: 'none', zIndex: 9999,
+      }}>
+        {updateLabel}
+      </Text>
     </View>
   );
 }
