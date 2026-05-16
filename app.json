@@ -26,7 +26,14 @@
       "@react-native-google-signin/google-signin",
       "@react-native-community/datetimepicker",
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Paul's Tools to access your photo library for course photos.",
+          "cameraPermission": "Allow Paul's Tools to use your camera to take course photos."
+        }
+      ]
     ],
     "updates": {
       "enabled": true,

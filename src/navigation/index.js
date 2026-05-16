@@ -25,7 +25,10 @@ import RoundTrackerScreen from '../screens/golf/RoundTrackerScreen';
 import PracticeLogScreen from '../screens/golf/PracticeLogScreen';
 import EquipmentScreen from '../screens/golf/EquipmentScreen';
 import ClubDistancesScreen from '../screens/golf/ClubDistancesScreen';
-import MarginTrackerScreen from '../screens/golf/MarginTrackerScreen';
+import MarginTrackerScreen  from '../screens/golf/MarginTrackerScreen';
+import CourseListScreen     from '../screens/golf/CourseListScreen';
+import CourseDetailScreen   from '../screens/golf/CourseDetailScreen';
+import AddCourseScreen      from '../screens/golf/AddCourseScreen';
 
 import LifeHomeScreen from '../screens/life/LifeHomeScreen';
 import AcademicPlannerScreen from '../screens/life/AcademicPlannerScreen';
@@ -125,7 +128,10 @@ function GolfNavigator() {
       <Golf.Screen name="Equipment"     component={EquipmentScreen}     options={{ title: 'Equipment' }} />
       <Golf.Screen name="ClubDistances" component={ClubDistancesScreen} options={{ title: 'Club Distances' }} />
       <Golf.Screen name="MarginTracker" component={MarginTrackerScreen} options={{ title: 'Margin Tracker' }} />
-      <Golf.Screen name="Settings"      component={SettingsScreen}      options={{ title: 'Settings' }} />
+      <Golf.Screen name="CourseList"   component={CourseListScreen}    options={{ title: 'Course Manager' }} />
+      <Golf.Screen name="CourseDetail" component={CourseDetailScreen}  options={{ title: 'Course' }} />
+      <Golf.Screen name="AddCourse"    component={AddCourseScreen}     options={{ title: 'Add Course' }} />
+      <Golf.Screen name="Settings"     component={SettingsScreen}      options={{ title: 'Settings' }} />
     </Golf.Navigator>
   );
 }

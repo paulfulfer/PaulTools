@@ -1,6 +1,7 @@
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
+import 'firebase/compat/storage';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
 const firebaseConfig = {
@@ -20,5 +21,6 @@ GoogleSignin.configure({
   webClientId: '287433829882-at0bb6kqq7b67o4vfq42hee48r5ff943.apps.googleusercontent.com',
 });
 
-export const auth = firebase.auth();
-export const db = firebase.firestore();
+export const auth    = firebase.auth();
+export const db      = firebase.firestore();
+export const storage = firebase.storage();

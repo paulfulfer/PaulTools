@@ -171,11 +171,11 @@ const p3 = StyleSheet.create({
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 const EMPTY_FORM = {
-  course:'', par:'72', score:'', firHit:'', firTotal:'', gir:'',
+  course:'', courseId:null, par:'72', score:'', firHit:'', firTotal:'', gir:'',
   putts:'', threePutts:'', notes:'', par3s:[]
 };
 
-export default function RoundTrackerScreen() {
+export default function RoundTrackerScreen({ navigation }) {
   const { theme, isDark } = useTheme();
   const { user }  = useAuth();
   const { triggerHaptic } = useHaptics();
@@ -186,6 +186,11 @@ export default function RoundTrackerScreen() {
   const [idCounter, setIdCounter] = useState(1);
   const [loading,   setLoading]   = useState(true);
   const [saved,     setSaved]     = useState(false);
+
+  // ── Courses (for picker) ─────────────────────────────────
+  const [myCourses,        setMyCourses]        = useState([]);
+  const [showCoursePicker, setShowCoursePicker] = useState(false);
+  const [courseSearch,     setCourseSearch]     = useState('');
 
   // ── UI ──────────────────────────────────────────────────
   const [open, setOpen] = useState({ stats:true, rounds:true });
@@ -237,6 +242,16 @@ export default function RoundTrackerScreen() {
 
   // ── Load ────────────────────────────────────────────────
   useEffect(() => { if (user) load(); }, [user]);
+
+  // Load saved courses for the picker
+  useEffect(() => {
+    if (!user) return;
+    firebase.firestore()
+      .collection('users').doc(user.uid).collection('courses')
+      .orderBy('name', 'asc').get()
+      .then(snap => setMyCourses(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+      .catch(() => {});
+  }, [user]);
 
   const load = async () => {
     setLoading(true);
@@ -311,7 +326,8 @@ export default function RoundTrackerScreen() {
   const openEdit = (round) => {
     setEditingRound(round);
     setForm({
-      course: round.course || '',
+      course:   round.course || '',
+      courseId: round.courseId || null,
       par:    String(round.par || 72),
       score:  String(round.score || ''),
       firHit: round.firHit != null ? String(round.firHit) : '',
@@ -333,6 +349,7 @@ export default function RoundTrackerScreen() {
     if (isNaN(score)) return Alert.alert('Missing score', 'Enter a gross score.');
     const round = {
       course:     form.course.trim(),
+      courseId:   form.courseId || null,
       date:       fmtDateKey(formDate),
       par:        parseInt(form.par) || 72,
       score,
@@ -512,9 +529,22 @@ export default function RoundTrackerScreen() {
                 {isFormMode && (
                   <>
                     <Text style={[s.formSec, { color:c.textMuted, borderBottomColor:c.borderSubtle, fontFamily:MONO }]}>ROUND INFO</Text>
-                    <FLabel label="Course Name" c={c} />
-                    <TextInput style={[s.textInput, { borderColor:c.borderSubtle, backgroundColor:c.bgBase, color:c.textPrimary, fontFamily:MONO }]}
-                      value={form.course} onChangeText={v=>setF('course',v)} placeholder="e.g. Hershey Country Club" placeholderTextColor={c.textMuted} />
+                    <FLabel label="Course" c={c} />
+                    {/* Course picker button */}
+                    <TouchableOpacity
+                      style={[s.textInput, { borderColor: form.courseId ? c.green : c.borderSubtle, backgroundColor:c.bgBase, flexDirection:'row', alignItems:'center', justifyContent:'space-between' }]}
+                      onPress={() => { setCourseSearch(''); setShowCoursePicker(true); }}
+                    >
+                      <Text style={[{ fontFamily:MONO, fontSize:13, color: form.course ? c.textPrimary : c.textMuted }]} numberOfLines={1}>
+                        {form.course || 'Select or type a course…'}
+                      </Text>
+                      <Text style={{ color: c.textMuted, fontSize: 12 }}>›</Text>
+                    </TouchableOpacity>
+                    {myCourses.length === 0 && (
+                      <TouchableOpacity onPress={() => { setModalMode(null); navigation.navigate('CourseList'); }} style={{ marginTop: 4 }}>
+                        <Text style={[{ color: c.blue, fontFamily: MONO, fontSize: 11 }]}>+ Add courses in Course Manager</Text>
+                      </TouchableOpacity>
+                    )}
 
                     <FLabel label="Date" c={c} />
                     <TouchableOpacity style={[s.dtBtn, { borderColor:c.borderSubtle, backgroundColor:c.bgBase }]} onPress={()=>setShowDatePicker(true)}>
@@ -676,6 +706,64 @@ export default function RoundTrackerScreen() {
             </View>
           </View>
           </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── Course Picker Modal ─────────────────────── */}
+      <Modal visible={showCoursePicker} animationType="slide" transparent onRequestClose={() => setShowCoursePicker(false)}>
+        <View style={{ flex:1, justifyContent:'flex-end', backgroundColor:'rgba(0,0,0,0.45)' }}>
+          <View style={[s.modalSheet, { borderColor:c.borderSubtle, maxHeight:'80%' }]}>
+            <BlurView intensity={60} tint={isDark?'dark':'light'} style={StyleSheet.absoluteFill} />
+            <View style={[s.modalHeader, { borderBottomColor:c.borderSubtle, backgroundColor:c.bgCard }]}>
+              <Text style={[s.modalTitle, { color:c.textPrimary, fontFamily:MONO }]}>Select Course</Text>
+              <TouchableOpacity style={[s.closeBtn, { backgroundColor:c.bgBase, borderColor:c.borderSubtle }]} onPress={() => setShowCoursePicker(false)}>
+                <Text style={{ color:c.textMuted, fontSize:14 }}>×</Text>
+              </TouchableOpacity>
+            </View>
+            {/* Search */}
+            <View style={[{ flexDirection:'row', alignItems:'center', padding:12, borderBottomWidth:1, borderBottomColor:c.borderSubtle }]}>
+              <TextInput
+                style={[{ flex:1, fontSize:13, color:c.textPrimary, fontFamily:MONO, backgroundColor:c.bgBase, borderWidth:1, borderColor:c.borderSubtle, borderRadius:8, paddingHorizontal:10, paddingVertical:8 }]}
+                value={courseSearch} onChangeText={setCourseSearch}
+                placeholder="Search or type a name…" placeholderTextColor={c.textMuted}
+                autoFocus
+              />
+            </View>
+            <ScrollView keyboardShouldPersistTaps="handled">
+              {/* Saved courses */}
+              {myCourses
+                .filter(co => !courseSearch || co.name?.toLowerCase().includes(courseSearch.toLowerCase()))
+                .map(co => (
+                  <TouchableOpacity key={co.id}
+                    style={[{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', paddingHorizontal:16, paddingVertical:14, borderBottomWidth:1, borderBottomColor:c.borderSubtle }]}
+                    onPress={() => { setF('course', co.name); setF('courseId', co.id); setShowCoursePicker(false); }}
+                  >
+                    <View>
+                      <Text style={[{ color:c.textPrimary, fontFamily:'Inter_600SemiBold', fontSize:14 }]}>{co.name}</Text>
+                      <Text style={[{ color:c.textMuted, fontFamily:MONO, fontSize:11, marginTop:1 }]}>
+                        {[co.city, co.state].filter(Boolean).join(', ')}
+                      </Text>
+                    </View>
+                    {form.courseId === co.id && <Text style={{ color:c.green, fontSize:16 }}>✓</Text>}
+                  </TouchableOpacity>
+                ))
+              }
+              {/* Use typed name option */}
+              {courseSearch.trim().length > 0 && (
+                <TouchableOpacity
+                  style={[{ flexDirection:'row', alignItems:'center', gap:10, paddingHorizontal:16, paddingVertical:14, borderBottomWidth:1, borderBottomColor:c.borderSubtle }]}
+                  onPress={() => { setF('course', courseSearch.trim()); setF('courseId', null); setShowCoursePicker(false); }}
+                >
+                  <Text style={{ fontSize:18 }}>✏️</Text>
+                  <View>
+                    <Text style={[{ color:c.textPrimary, fontFamily:'Inter_600SemiBold', fontSize:14 }]}>Use "{courseSearch.trim()}"</Text>
+                    <Text style={[{ color:c.textMuted, fontFamily:MONO, fontSize:11 }]}>Enter as custom course name</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+              <View style={{ height: 40 }} />
+            </ScrollView>
+          </View>
+        </View>
       </Modal>
 
     </View>

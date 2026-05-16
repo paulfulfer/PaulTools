@@ -25,6 +25,12 @@ const SECTIONS = [
       { id: 'mt', title: 'Margin Tracker', description: 'Dispersion analysis, par margin benchmarks, and session trend tracking.', icon: '🎯', accent: 'green', route: 'MarginTracker' },
     ],
   },
+  {
+    label: 'Courses',
+    tools: [
+      { id: 'cm', title: 'Course Manager', description: 'Build your course book — hole-by-hole detail, ratings, photos, and round history per course.', icon: '🗺️', accent: 'teal', route: 'CourseList' },
+    ],
+  },
 ];
 
 export default function GolfHomeScreen({ navigation }) {
