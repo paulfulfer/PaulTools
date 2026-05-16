@@ -177,7 +177,7 @@ export default function SettingsScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  scroll:       { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40 },
+  scroll:       { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 80 },
   card:         { borderRadius: 10, borderWidth: 1, overflow: 'hidden' },
 
   accountRow:   { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderBottomWidth: 1 },

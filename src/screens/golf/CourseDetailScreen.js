@@ -570,7 +570,7 @@ export default function CourseDetailScreen({ route, navigation }) {
           </View>
         )}
 
-        <View style={{ height: 60 }} />
+        <View style={{ height: 80 }} />
       </ScrollView>
 
       {/* Hole edit modal */}
