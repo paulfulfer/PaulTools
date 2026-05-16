@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TextInput, TouchableOpacity,
   StyleSheet, Alert, Platform, Modal, KeyboardAvoidingView,
-  ActivityIndicator,
+  ActivityIndicator, Image,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { uploadEquipmentPhoto } from '../../utils/storageHelpers';
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -98,7 +100,11 @@ function ItemBubble({ item, inPlay, onPress, c }) {
         borderColor:     inPlay ? c.green     : c.borderSubtle,
       }]}
     >
-      <View style={[ib.dot, { backgroundColor: inPlay ? c.green : c.textMuted }]} />
+      {item.photoUrl ? (
+        <Image source={{ uri: item.photoUrl }} style={ib.thumb} />
+      ) : (
+        <View style={[ib.dot, { backgroundColor: inPlay ? c.green : c.textMuted }]} />
+      )}
       <View style={{ flex:1, minWidth:0 }}>
         <Text style={[ib.name, { color: inPlay ? c.green : c.textPrimary, fontFamily:MONO }]} numberOfLines={1}>{name}</Text>
         {!!sub && <Text style={[ib.sub, { color: inPlay ? c.green : c.textMuted, fontFamily:MONO }]} numberOfLines={1}>{sub}</Text>}
@@ -109,6 +115,7 @@ function ItemBubble({ item, inPlay, onPress, c }) {
 const ib = StyleSheet.create({
   bubble: { flexDirection:'row', alignItems:'center', gap:8, borderWidth:1.5, borderRadius:50, paddingHorizontal:14, paddingVertical:8, marginRight:8, marginBottom:8, maxWidth:240 },
   dot:    { width:7, height:7, borderRadius:4, flexShrink:0 },
+  thumb:  { width:22, height:22, borderRadius:11, flexShrink:0 },
   name:   { fontSize:12, fontWeight:'600' },
   sub:    { fontSize:10 },
 });
@@ -264,6 +271,50 @@ export default function EquipmentScreen() {
     ]);
   };
 
+  // ── Photo handling ──────────────────────────────────────
+  const [photoUploading, setPhotoUploading] = useState(false);
+
+  const pickPhotoForItem = (type, id) => {
+    Alert.alert('Add Photo', 'Choose a source', [
+      {
+        text: 'Take Photo', onPress: async () => {
+          const { status } = await ImagePicker.requestCameraPermissionsAsync();
+          if (status !== 'granted') return Alert.alert('Permission needed', 'Camera access required.');
+          const result = await ImagePicker.launchCameraAsync({ quality: 0.7, allowsEditing: true });
+          if (!result.canceled && result.assets?.[0]) await uploadAndSavePhoto(type, id, result.assets[0].uri);
+        },
+      },
+      {
+        text: 'Choose from Library', onPress: async () => {
+          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (status !== 'granted') return Alert.alert('Permission needed', 'Photo library access required.');
+          const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7, allowsEditing: true });
+          if (!result.canceled && result.assets?.[0]) await uploadAndSavePhoto(type, id, result.assets[0].uri);
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const uploadAndSavePhoto = async (type, id, uri) => {
+    setPhotoUploading(true);
+    try {
+      const url = await uploadEquipmentPhoto(user.uid, `${type}_${id}`, uri);
+      const updItems = (equipment[type] || []).map(x => x.id === id ? { ...x, photoUrl: url } : x);
+      const updEq = { ...equipment, [type]: updItems };
+      setEquipment(updEq);
+      await persist(updEq, idCounter);
+    } catch (err) { Alert.alert('Upload error', err.message); }
+    finally { setPhotoUploading(false); }
+  };
+
+  const removePhotoFromItem = async (type, id) => {
+    const updItems = (equipment[type] || []).map(x => x.id === id ? { ...x, photoUrl: '' } : x);
+    const updEq = { ...equipment, [type]: updItems };
+    setEquipment(updEq);
+    await persist(updEq, idCounter);
+  };
+
   // ── Modal item lookup ───────────────────────────────────
   const modalItem = modalItemId != null
     ? (equipment[modalType] || []).find(x => x.id === modalItemId)
@@ -409,6 +460,33 @@ export default function EquipmentScreen() {
                       )}
                     </View>
 
+                    {/* Photo */}
+                    <View style={[s.photoSection, { borderTopColor: c.borderSubtle }]}>
+                      {modalItem.photoUrl ? (
+                        <>
+                          <TouchableOpacity
+                            onLongPress={() => Alert.alert('Remove Photo', '', [
+                              { text: 'Remove', style: 'destructive', onPress: () => removePhotoFromItem(modalType, modalItemId) },
+                              { text: 'Cancel', style: 'cancel' },
+                            ])}
+                          >
+                            <Image source={{ uri: modalItem.photoUrl }} style={s.photoPreview} resizeMode="cover" />
+                          </TouchableOpacity>
+                          <Text style={[s.photoHint, { color: c.textMuted, fontFamily: MONO }]}>Long-press photo to remove</Text>
+                        </>
+                      ) : (
+                        <TouchableOpacity
+                          style={[s.photoAddBtn, { borderColor: c.borderSubtle }]}
+                          onPress={() => pickPhotoForItem(modalType, modalItemId)}
+                          disabled={photoUploading}
+                        >
+                          <Text style={[{ color: c.textMuted, fontFamily: MONO, fontSize: 12 }]}>
+                            {photoUploading ? 'Uploading…' : '📷  Add Photo'}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+
                     {/* Actions */}
                     <View style={[s.modalActions, { borderTopColor: c.borderSubtle }]}>
                       <TouchableOpacity onPress={() => deleteItem(modalType, modalItemId)} style={[s.actionBtn, { backgroundColor: c.redGlow, borderColor: c.red }]}>
@@ -498,6 +576,10 @@ const s = StyleSheet.create({
   closeBtn:    { width:28, height:28, borderRadius:14, borderWidth:1, alignItems:'center', justifyContent:'center' },
   modalBody:   { padding:18, paddingBottom:36 },
   modalActions:{ flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginTop:18, paddingTop:14, borderTopWidth:1 },
+  photoSection:{ marginTop:14, paddingTop:14, borderTopWidth:1 },
+  photoPreview:{ width:'100%', height:180, borderRadius:10, marginBottom:6 },
+  photoAddBtn: { borderWidth:1.5, borderStyle:'dashed', borderRadius:10, paddingVertical:18, alignItems:'center' },
+  photoHint:   { fontSize:10, textAlign:'center', marginTop:4 },
   actionBtn:   { borderWidth:1, borderRadius:20, paddingVertical:7, paddingHorizontal:18 },
   actionTxt:   { fontSize:12, fontWeight:'600', letterSpacing:0.3 },
 

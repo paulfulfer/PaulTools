@@ -17,6 +17,28 @@ export async function uploadCoursePhoto(userId, courseId, type, imageUri) {
   return await ref.getDownloadURL();
 }
 
+/** Upload a club/equipment photo. quality: 0.7 applied by the caller. */
+export async function uploadEquipmentPhoto(userId, clubId, imageUri) {
+  const filename = `${Date.now()}.jpg`;
+  const path = `equipment-photos/${userId}/${clubId}/${filename}`;
+  const ref = storage.ref(path);
+  const response = await fetch(imageUri);
+  const blob = await response.blob();
+  await ref.put(blob, { contentType: 'image/jpeg' });
+  return await ref.getDownloadURL();
+}
+
+/** Upload a workout card photo. quality: 0.7 applied by the caller. */
+export async function uploadWorkoutPhoto(userId, entryId, imageUri) {
+  const filename = `${Date.now()}.jpg`;
+  const path = `workout-photos/${userId}/${entryId}/${filename}`;
+  const ref = storage.ref(path);
+  const response = await fetch(imageUri);
+  const blob = await response.blob();
+  await ref.put(blob, { contentType: 'image/jpeg' });
+  return await ref.getDownloadURL();
+}
+
 /**
  * Delete a file at a given Storage URL.
  */

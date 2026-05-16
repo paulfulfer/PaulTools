@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, Text } from 'react-native';
 import * as Updates from 'expo-updates';
+import * as Notifications from 'expo-notifications';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import {
@@ -23,6 +24,11 @@ function StatusBarController() {
 
 function AppRoot() {
   const { theme } = useTheme();
+
+  // Request notification permissions once on first launch
+  useEffect(() => {
+    Notifications.requestPermissionsAsync().catch(() => {});
+  }, []);
 
   const [fontsLoaded] = useFonts({
     Inter_400Regular,

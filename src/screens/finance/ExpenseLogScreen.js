@@ -11,6 +11,12 @@ import { BlurView } from 'expo-blur';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useHaptics } from '../../hooks/useHaptics';
+import {
+  nextRenewalDate,
+  scheduleRenewalReminder,
+  cancelRenewalReminder,
+  rescheduleAllReminders,
+} from '../../utils/notificationHelpers';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -316,7 +322,7 @@ const sm = StyleSheet.create({
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-export default function ExpenseLogScreen() {
+export default function ExpenseLogScreen({ navigation }) {
   const { theme } = useTheme();
   const { user }  = useAuth();
   const { triggerHaptic } = useHaptics();
@@ -340,6 +346,15 @@ export default function ExpenseLogScreen() {
 
   const subsRef = useRef(subs);
   useEffect(() => { subsRef.current = subs; }, [subs]);
+
+  // Resync notification schedule whenever this screen comes back into focus
+  useEffect(() => {
+    if (!navigation) return;
+    const unsub = navigation.addListener('focus', () => {
+      if (subsRef.current.length) rescheduleAllReminders(subsRef.current);
+    });
+    return unsub;
+  }, [navigation]);
 
   // ── Firestore ────────────────────────────────────────────
 
@@ -416,9 +431,11 @@ export default function ExpenseLogScreen() {
 
   const handleAddSub = useCallback(async (subData) => {
     triggerHaptic();
-    const updated = [...subsRef.current, { ...subData, id: Date.now() }];
+    const newSub = { ...subData, id: Date.now() };
+    const updated = [...subsRef.current, newSub];
     setSubs(updated);
     setAddSubModal(false);
+    scheduleRenewalReminder(newSub); // fire-and-forget
     await persistSubs(updated);
   }, []);
 
@@ -426,6 +443,7 @@ export default function ExpenseLogScreen() {
     Alert.alert('Remove subscription?', '', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
+        cancelRenewalReminder(id); // fire-and-forget
         const updated = subsRef.current.filter(s => s.id !== id);
         setSubs(updated);
         await persistSubs(updated);
@@ -561,10 +579,11 @@ export default function ExpenseLogScreen() {
               </View>
             ) : (
               subs.map(sub => {
-                const days   = daysUntil(sub.renewalDate);
-                const soon   = days >= 0 && days <= 7;
-                const overdue = days < 0;
-                const warn   = soon || overdue;
+                // Roll any past stored date forward to the true next occurrence
+                const nextDate = nextRenewalDate(sub.renewalDate, sub.freq) || sub.renewalDate;
+                const days    = daysUntil(nextDate);
+                const soon    = days >= 0 && days <= 7;
+                const warn    = soon;           // never flag overdue — past dates roll forward
                 return (
                   <View key={sub.id} style={[s.subItem, { backgroundColor: c.bgCard, borderColor: warn ? c.amber : c.borderSubtle }]}>
                     <View style={{ flex: 1, minWidth: 0 }}>
@@ -573,7 +592,7 @@ export default function ExpenseLogScreen() {
                         {warn && (
                           <View style={[s.warnPill, { backgroundColor: c.amberGlow, borderColor: c.amber }]}>
                             <Text style={{ color: c.amber, fontSize: 9, fontWeight: '700', fontFamily: MONO }}>
-                              {overdue ? 'OVERDUE' : days === 0 ? 'TODAY' : `${days}D`}
+                              {days === 0 ? 'TODAY' : `${days}D`}
                             </Text>
                           </View>
                         )}
@@ -583,7 +602,7 @@ export default function ExpenseLogScreen() {
                       </View>
                       <View style={s.subBottomRow}>
                         <Text style={[s.subMeta, { color: c.textMuted, fontFamily: MONO }]}>
-                          Renews {fmtRenewal(sub.renewalDate)}
+                          Renews {fmtRenewal(nextDate)}
                         </Text>
                         <Text style={[s.subMonthly, { color: c.textMuted, fontFamily: MONO }]}>
                           {fmt$(monthlyEq(sub))}/mo

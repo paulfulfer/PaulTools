@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TextInput, TouchableOpacity,
-  StyleSheet, Alert, Modal, ActivityIndicator, Platform,
+  StyleSheet, Alert, Modal, ActivityIndicator, Platform, Image,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
+import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useHaptics } from '../../hooks/useHaptics';
+import { uploadWorkoutPhoto } from '../../utils/storageHelpers';
 
 const MONO = 'Inter_500Medium';
 
@@ -324,6 +326,51 @@ export default function WorkoutTrackerScreen() {
     ]);
   }, []);
 
+  // ── Card photos ───────────────────────────────────────────────────────────────
+
+  const [photoUploading, setPhotoUploading] = useState(false);
+
+  const pickPhotoForCard = (cardId) => {
+    Alert.alert('Add Photo', 'Choose a source', [
+      {
+        text: 'Take Photo', onPress: async () => {
+          const { status } = await ImagePicker.requestCameraPermissionsAsync();
+          if (status !== 'granted') return Alert.alert('Permission needed', 'Camera access required.');
+          const result = await ImagePicker.launchCameraAsync({ quality: 0.7, allowsEditing: true });
+          if (!result.canceled && result.assets?.[0]) await uploadAndSaveCardPhoto(cardId, result.assets[0].uri);
+        },
+      },
+      {
+        text: 'Choose from Library', onPress: async () => {
+          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (status !== 'granted') return Alert.alert('Permission needed', 'Photo library access required.');
+          const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7, allowsEditing: true });
+          if (!result.canceled && result.assets?.[0]) await uploadAndSaveCardPhoto(cardId, result.assets[0].uri);
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const uploadAndSaveCardPhoto = async (cardId, uri) => {
+    const uid = userRef.current?.uid;
+    if (!uid) return;
+    setPhotoUploading(cardId);
+    try {
+      const url = await uploadWorkoutPhoto(uid, `card_${cardId}`, uri);
+      const updated = cardsRef.current.map(c2 => c2.id === cardId ? { ...c2, photoUrl: url } : c2);
+      setCards(updated);
+      await writeAll(updated, sessRef.current, weightsRef.current, prsRef.current, idCRef.current);
+    } catch (err) { Alert.alert('Upload error', err.message); }
+    finally { setPhotoUploading(null); }
+  };
+
+  const removePhotoFromCard = async (cardId) => {
+    const updated = cardsRef.current.map(c2 => c2.id === cardId ? { ...c2, photoUrl: '' } : c2);
+    setCards(updated);
+    await writeAll(updated, sessRef.current, weightsRef.current, prsRef.current, idCRef.current);
+  };
+
   // ── Session ───────────────────────────────────────────────────────────────────
 
   const handleLogSession = async () => {
@@ -457,6 +504,27 @@ export default function WorkoutTrackerScreen() {
                   </TouchableOpacity>
                   <Text style={[st.cardName, { color: c.textPrimary, fontFamily: MONO }]}>{card.name}</Text>
                   <Text style={[st.cardDate, { color: c.textMuted, fontFamily: MONO }]}>Added {card.addedAt}</Text>
+                  {card.photoUrl ? (
+                    <TouchableOpacity
+                      style={{ marginTop: 8 }}
+                      onLongPress={() => Alert.alert('Remove Photo', '', [
+                        { text: 'Remove', style: 'destructive', onPress: () => removePhotoFromCard(card.id) },
+                        { text: 'Cancel', style: 'cancel' },
+                      ])}
+                    >
+                      <Image source={{ uri: card.photoUrl }} style={st.cardThumb} resizeMode="cover" />
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={[st.cardCameraBtn, { borderColor: c.borderSubtle }]}
+                      onPress={() => pickPhotoForCard(card.id)}
+                      disabled={photoUploading === card.id}
+                    >
+                      <Text style={{ color: c.textMuted, fontSize: 11, fontFamily: MONO }}>
+                        {photoUploading === card.id ? '…' : '📷'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               ))}
             </View>
@@ -684,7 +752,9 @@ const st = StyleSheet.create({
   progCard: { width: '47%', flexGrow: 1, borderWidth: 1, borderRadius: 10, padding: 13, position: 'relative' },
   cardDel:  { position: 'absolute', top: 8, right: 10, padding: 2 },
   cardName: { fontSize: 12, fontWeight: '600', marginBottom: 4, marginRight: 18 },
-  cardDate: { fontSize: 10 },
+  cardDate:      { fontSize: 10 },
+  cardThumb:     { width: '100%', height: 90, borderRadius: 8 },
+  cardCameraBtn: { marginTop: 8, borderWidth: 1, borderStyle: 'dashed', borderRadius: 8, paddingVertical: 8, alignItems: 'center' },
 
   card:        { borderWidth: 1, borderRadius: 10, padding: 14, marginBottom: 4 },
   formRow:     { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
