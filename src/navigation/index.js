@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, ActivityIndicator, TouchableOpacity, Text, StyleSheet } from 'react-native';
-import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
+import { View, ActivityIndicator, TouchableOpacity, Text, StyleSheet, Platform } from 'react-native';
+import { NavigationContainer, DefaultTheme, DarkTheme, useIsFocused } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
@@ -157,12 +157,32 @@ function LifeNavigator() {
   );
 }
 
+// ─── Web tab isolation ────────────────────────────────────────────────────────
+// On web, React Navigation renders all tab screens simultaneously which causes
+// them to stack on top of each other. This wrapper hides inactive tabs via
+// display:none while keeping them mounted (preserving state). No-op on mobile.
+
+function WebTabHider({ children }) {
+  const isFocused = useIsFocused();
+  if (Platform.OS !== 'web') return children;
+  return (
+    <View style={{ flex: 1, display: isFocused ? 'flex' : 'none' }}>
+      {children}
+    </View>
+  );
+}
+
+function FinanceTabScreen() { return <WebTabHider><FinanceNavigator /></WebTabHider>; }
+function GolfTabScreen()    { return <WebTabHider><GolfNavigator /></WebTabHider>; }
+function LifeTabScreen()    { return <WebTabHider><LifeNavigator /></WebTabHider>; }
+
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
 
 function MainTabs() {
   const { theme, isDark } = useTheme();
   return (
     <Tab.Navigator
+      detatchInactiveScreens={true}
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
@@ -184,7 +204,7 @@ function MainTabs() {
     >
       <Tab.Screen
         name="FinanceTab"
-        component={FinanceNavigator}
+        component={FinanceTabScreen}
         options={{
           title: 'Finance',
           tabBarActiveTintColor: theme.colors.green,
@@ -193,7 +213,7 @@ function MainTabs() {
       />
       <Tab.Screen
         name="GolfTab"
-        component={GolfNavigator}
+        component={GolfTabScreen}
         options={{
           title: 'Golf',
           tabBarActiveTintColor: theme.colors.teal,
@@ -202,7 +222,7 @@ function MainTabs() {
       />
       <Tab.Screen
         name="LifeTab"
-        component={LifeNavigator}
+        component={LifeTabScreen}
         options={{
           title: 'Life',
           tabBarActiveTintColor: theme.colors.purple,
