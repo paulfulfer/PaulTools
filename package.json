@@ -6,7 +6,8 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "deploy": "gh-pages -d dist"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
@@ -45,6 +46,7 @@
   "devDependencies": {
     "@babel/core": "^7.25.0",
     "babel-preset-expo": "~54.0.10",
+    "gh-pages": "^6.3.0",
     "jimp": "^1.6.1"
   },
   "private": true

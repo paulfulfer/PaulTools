@@ -20,7 +20,8 @@
       }
     },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "baseUrl": "/PaulTools"
     },
     "plugins": [
       "@react-native-google-signin/google-signin",
