@@ -33,9 +33,7 @@
       "fallbackToCacheTimeout": 0,
       "url": "https://u.expo.dev/44428a85-9987-4d8a-9ac0-65adc9b9edb8"
     },
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "runtimeVersion": "1.0.0",
     "extra": {
       "eas": {
         "projectId": "44428a85-9987-4d8a-9ac0-65adc9b9edb8"
