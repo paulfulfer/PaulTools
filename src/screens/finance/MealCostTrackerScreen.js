@@ -84,8 +84,9 @@ export default function MealCostTrackerScreen() {
   const [mToCost,     setMToCost]     = useState('');
   const [mToPortions, setMToPortions] = useState('1');
   const [mToAddInv,   setMToAddInv]   = useState(false);
-  const [mealIngs,    setMealIngs]    = useState({}); // { [itemId]: qtyString }
-  const [showMDate,   setShowMDate]   = useState(false);
+  const [mealIngs,      setMealIngs]      = useState({}); // { [itemId]: qtyString }
+  const [mTakeoutIngs,  setMTakeoutIngs]  = useState({}); // { [itemId]: qtyString }
+  const [showMDate,     setShowMDate]     = useState(false);
 
   // ── Refs (stale-closure guard for async handlers) ───────────────────────────
   const invRef   = useRef(inventory);
@@ -197,25 +198,26 @@ export default function MealCostTrackerScreen() {
         if (inv_item) inv_item.remainingUnits = Math.max(0, parseFloat((inv_item.remainingUnits - qty).toFixed(2)));
       }
     } else {
-      const totalCost = parseFloat(mToCost);
-      const portions  = parseFloat(mToPortions) || 1;
-      if (isNaN(totalCost) || totalCost <= 0) return Alert.alert('Required', 'Enter the takeout cost.');
-      const portionCost = totalCost / portions;
-      mealCost = portionCost;
-      ingredientsList = [{ name: 'Takeout', qty: portions, unitName: 'portions', cost: totalCost }];
-      if (mToAddInv) {
-        updatedInv = [...updatedInv, {
-          id: newId++,
-          name: mName.trim() + ' (leftover)',
-          cost: totalCost,
-          totalUnits: portions,
-          remainingUnits: Math.max(0, portions - 1),
-          unitName: 'portions',
-          costPerUnit: portionCost,
-          date: fmtDateKey(mDate),
-          type: 'takeout',
-          notes: 'Auto from meal log',
-        }];
+      // Takeout: prefer inventory-based selection, fall back to manual cost
+      const usedTakeout = updatedInv.filter(x => x.type === 'takeout' && parseFloat(mTakeoutIngs[x.id]) > 0);
+
+      if (usedTakeout.length > 0) {
+        for (const item of usedTakeout) {
+          const qty = parseFloat(mTakeoutIngs[item.id]);
+          if (qty > item.remainingUnits) {
+            return Alert.alert('Not enough stock', `Only ${item.remainingUnits.toFixed(1)} ${item.unitName} of ${item.name} remaining.`);
+          }
+          const cost = qty * item.costPerUnit;
+          mealCost += cost;
+          ingredientsList.push({ id: item.id, name: item.name, qty, unitName: item.unitName, cost });
+          const inv_item = updatedInv.find(x => x.id === item.id);
+          if (inv_item) inv_item.remainingUnits = Math.max(0, parseFloat((inv_item.remainingUnits - qty).toFixed(2)));
+        }
+      } else {
+        const totalCost = parseFloat(mToCost);
+        if (isNaN(totalCost) || totalCost <= 0) return Alert.alert('Required', 'Select a takeout item or enter the cost.');
+        mealCost = totalCost;
+        ingredientsList = [{ name: 'Takeout', qty: 1, unitName: 'meal', cost: totalCost }];
       }
     }
 
@@ -234,6 +236,7 @@ export default function MealCostTrackerScreen() {
     setMeals(updatedMeals);
     setIdC(newId);
     setMealIngs({});
+    setMTakeoutIngs({});
     setMName(''); setMNotes(''); setMToCost(''); setMToPortions('1'); setMToAddInv(false);
     try { await writeAll(updatedInv, updatedMeals, newId); }
     catch (err) { Alert.alert('Save error', err.message); }
@@ -262,11 +265,13 @@ export default function MealCostTrackerScreen() {
   const savingsPerMeal = avgHome != null && avgTakeout != null ? avgTakeout - avgHome : null;
   const totalSaved     = savingsPerMeal != null && savingsPerMeal > 0 ? savingsPerMeal * homeMeals.length : null;
 
-  const groceryItems   = inventory.filter(x => x.type === 'grocery' && x.remainingUnits > 0);
-  const calcMealCost   = groceryItems.reduce((s, item) => s + (parseFloat(mealIngs[item.id])||0) * item.costPerUnit, 0);
-  const usedIngCount   = groceryItems.filter(item => parseFloat(mealIngs[item.id]) > 0).length;
-  const toPreview      = (parseFloat(mToCost)||0) / (parseFloat(mToPortions)||1);
-  const fCostPreview   = (parseFloat(fCost)||0) / (parseFloat(fUnits)||1);
+  const groceryItems      = inventory.filter(x => x.type === 'grocery' && x.remainingUnits > 0);
+  const calcMealCost      = groceryItems.reduce((s, item) => s + (parseFloat(mealIngs[item.id])||0) * item.costPerUnit, 0);
+  const usedIngCount      = groceryItems.filter(item => parseFloat(mealIngs[item.id]) > 0).length;
+  const takeoutItems      = inventory.filter(x => x.type === 'takeout' && x.remainingUnits > 0);
+  const calcTakeoutCost   = takeoutItems.reduce((s, item) => s + (parseFloat(mTakeoutIngs[item.id])||0) * item.costPerUnit, 0);
+  const usedTakeoutCount  = takeoutItems.filter(item => parseFloat(mTakeoutIngs[item.id]) > 0).length;
+  const fCostPreview      = (parseFloat(fCost)||0) / (parseFloat(fUnits)||1);
 
   // ── Stats ───────────────────────────────────────────────────────────────────
 
@@ -674,42 +679,65 @@ export default function MealCostTrackerScreen() {
                 </View>
               )}
 
-              {/* ── Takeout ── */}
+              {/* ── Takeout: inventory picker ── */}
               {mType === 'takeout' && (
                 <View>
+                  <View style={[st.ingPicker, { backgroundColor: c.bgBase, borderColor: c.borderSubtle }]}>
+                    <Text style={[st.ingTitle, { color: c.textMuted, fontFamily: MONO }]}>SELECT TAKEOUT ITEM</Text>
+                    {takeoutItems.length === 0 ? (
+                      <Text style={[st.ingEmpty, { color: c.textMuted, fontFamily: MONO }]}>
+                        No takeout items in inventory. Log a purchase under Groceries first.
+                      </Text>
+                    ) : (
+                      takeoutItems.map(item => {
+                        const qty     = mTakeoutIngs[item.id] || '';
+                        const rowCost = (parseFloat(qty) || 0) * item.costPerUnit;
+                        return (
+                          <View key={item.id} style={[st.ingRow, { borderBottomColor: c.borderSubtle }]}>
+                            <View style={{ flex: 1, minWidth: 0 }}>
+                              <Text style={[st.ingName, { color: c.textPrimary, fontFamily: MONO }]} numberOfLines={1}>{item.name}</Text>
+                              <Text style={[st.ingStock, { color: c.textMuted, fontFamily: MONO }]}>
+                                {item.remainingUnits.toFixed(1)} {item.unitName} left · {fmt$(item.costPerUnit)}/{item.unitName}
+                              </Text>
+                            </View>
+                            <TextInput
+                              style={[st.ingQty, { borderColor: c.borderSubtle, backgroundColor: c.bgCard, color: c.textPrimary, fontFamily: MONO }]}
+                              value={qty}
+                              onChangeText={v => {
+                                setMTakeoutIngs(prev => ({ ...prev, [item.id]: v }));
+                                if ((parseFloat(v) || 0) > 0 && !mName.trim()) {
+                                  setMName(item.name);
+                                }
+                              }}
+                              placeholder="0" placeholderTextColor={c.textMuted} keyboardType="decimal-pad"
+                            />
+                            <Text style={[st.ingUnit, { color: c.textMuted, fontFamily: MONO }]}>{item.unitName}</Text>
+                            <Text style={[st.ingCost, { color: rowCost > 0 ? c.amber : c.textMuted, fontFamily: MONO }]}>
+                              {rowCost > 0 ? fmt$(rowCost) : '$0.00'}
+                            </Text>
+                          </View>
+                        );
+                      })
+                    )}
+                    {usedTakeoutCount > 0 && (
+                      <View style={[st.calcRow, { borderTopColor: c.borderSubtle }]}>
+                        <Text style={[st.calcLabel, { color: c.textMuted, fontFamily: MONO }]}>Meal cost:</Text>
+                        <Text style={[st.calcCost, { color: c.amber, fontFamily: MONO }]}>{fmt$(calcTakeoutCost)}</Text>
+                        <Text style={[st.calcSub, { color: c.textMuted, fontFamily: MONO }]}>
+                          ({usedTakeoutCount} item{usedTakeoutCount > 1 ? 's' : ''})
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
                   <View style={st.formRow}>
                     <View style={{ flex: 1 }}>
-                      <FLabel label="Total Cost ($)" c={c} />
+                      <FLabel label="Total Cost ($) — optional" c={c} />
                       <TextInput style={[st.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.amber, fontFamily: MONO }]}
                         value={mToCost} onChangeText={setMToCost} placeholder="0.00"
                         placeholderTextColor={c.textMuted} keyboardType="decimal-pad" />
                     </View>
-                    <View style={{ flex: 1 }}>
-                      <FLabel label="Your Portions" c={c} />
-                      <TextInput style={[st.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
-                        value={mToPortions} onChangeText={setMToPortions} placeholder="1"
-                        placeholderTextColor={c.textMuted} keyboardType="decimal-pad" />
-                    </View>
-                    {parseFloat(mToCost) > 0 && (
-                      <View style={[st.costPreview, { backgroundColor: c.amberGlow, borderColor: c.amber, alignSelf: 'flex-end', marginTop: 10 }]}>
-                        <Text style={[st.costPreviewTxt, { color: c.amber, fontFamily: MONO }]}>{fmt$(toPreview)} / meal</Text>
-                      </View>
-                    )}
                   </View>
-                  <Text style={[st.hint, { color: c.textMuted, fontFamily: MONO }]}>
-                    e.g. $9.11 pizza ÷ 4 slices = $2.28/meal. Enter portions YOU ate.
-                  </Text>
-                  <TouchableOpacity style={st.checkRow} onPress={() => setMToAddInv(v => !v)}>
-                    <View style={[st.checkbox, {
-                      borderColor:     mToAddInv ? c.green : c.borderSubtle,
-                      backgroundColor: mToAddInv ? c.greenGlow : 'transparent',
-                    }]}>
-                      {mToAddInv && <Text style={{ color: c.green, fontSize: 10, fontWeight: '700' }}>✓</Text>}
-                    </View>
-                    <Text style={[st.checkLabel, { color: c.textSecondary, fontFamily: MONO }]}>
-                      Add remaining portions to inventory
-                    </Text>
-                  </TouchableOpacity>
                 </View>
               )}
 
