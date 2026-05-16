@@ -2,13 +2,19 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TextInput, TouchableOpacity,
   StyleSheet, Alert, Platform, ActivityIndicator,
+  Animated, LayoutAnimation, UIManager,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useHaptics } from '../../hooks/useHaptics';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 const MONO = 'Inter_500Medium';
 
@@ -64,7 +70,9 @@ export default function MealCostTrackerScreen() {
   const [saved,     setSaved]     = useState(false);
 
   // ── UI state ────────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState('grocery');
+  const [activeTab,    setActiveTab]    = useState('grocery');
+  const [invCollapsed, setInvCollapsed] = useState(false);
+  const chevronAnim = useRef(new Animated.Value(0)).current;
 
   // ── Grocery form ────────────────────────────────────────────────────────────
   const [fDate,     setFDate]     = useState(new Date());
@@ -84,9 +92,20 @@ export default function MealCostTrackerScreen() {
   const [mToCost,     setMToCost]     = useState('');
   const [mToPortions, setMToPortions] = useState('1');
   const [mToAddInv,   setMToAddInv]   = useState(false);
-  const [mealIngs,      setMealIngs]      = useState({}); // { [itemId]: qtyString }
-  const [mTakeoutIngs,  setMTakeoutIngs]  = useState({}); // { [itemId]: qtyString }
-  const [showMDate,     setShowMDate]     = useState(false);
+  const [mealIngs,     setMealIngs]    = useState({});
+  const [mTakeoutIngs, setMTakeoutIngs] = useState({});
+  const [showMDate,    setShowMDate]   = useState(false);
+
+  // ── Cart ─────────────────────────────────────────────────────────────────────
+  const [cartItems,      setCartItems]      = useState([]);
+  const [cartItemName,   setCartItemName]   = useState('');
+  const [cartItemPrice,  setCartItemPrice]  = useState('');
+  const [cartName,       setCartName]       = useState('');
+  const [savedCarts,     setSavedCarts]     = useState([]);
+  const [expandedCartId, setExpandedCartId] = useState(null);
+  const [editingItemId,  setEditingItemId]  = useState(null);
+  const [editingPrice,   setEditingPrice]   = useState('');
+  const [cartLocalId,    setCartLocalId]    = useState(1);
 
   // ── Refs (stale-closure guard for async handlers) ───────────────────────────
   const invRef   = useRef(inventory);
@@ -130,11 +149,39 @@ export default function MealCostTrackerScreen() {
       setInventory(JSON.parse(d.meal_inventory || '[]'));
       setMeals(JSON.parse(d.meal_meals || '[]'));
       setIdC(parseInt(d.meal_id || '1', 10));
+
+      // Restore inventory collapse preference
+      const collapsed = await AsyncStorage.getItem('meal_inventory_collapsed');
+      if (collapsed === 'true') {
+        setInvCollapsed(true);
+        chevronAnim.setValue(1);
+      }
+
+      // Load saved carts
+      const uid = userRef.current?.uid;
+      if (uid) {
+        const cartsSnap = await firebase.firestore()
+          .collection('users').doc(uid).collection('savedCarts')
+          .orderBy('createdAt', 'desc').get();
+        setSavedCarts(cartsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }
     } catch (err) { Alert.alert('Load error', err.message); }
     finally { setLoading(false); }
   };
 
   // ── Handlers ────────────────────────────────────────────────────────────────
+
+  const toggleInventory = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    const next = !invCollapsed;
+    setInvCollapsed(next);
+    Animated.timing(chevronAnim, {
+      toValue: next ? 1 : 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+    AsyncStorage.setItem('meal_inventory_collapsed', String(next));
+  };
 
   const addPurchase = async () => {
     triggerHaptic();
@@ -178,7 +225,7 @@ export default function MealCostTrackerScreen() {
     let mealCost = 0;
     let ingredientsList = [];
     let newId = idCRef.current;
-    let updatedInv = invRef.current.map(x => ({ ...x })); // shallow copy each item
+    let updatedInv = invRef.current.map(x => ({ ...x }));
 
     if (mType === 'home') {
       const groceries = updatedInv.filter(x => x.type === 'grocery' && x.remainingUnits > 0);
@@ -254,6 +301,74 @@ export default function MealCostTrackerScreen() {
     ]);
   };
 
+  // ── Cart handlers ─────────────────────────────────────────────────────────────
+
+  const addCartItem = () => {
+    const name  = cartItemName.trim();
+    const price = parseFloat(cartItemPrice);
+    if (!name)                     return Alert.alert('Required', 'Enter an item name.');
+    if (isNaN(price) || price < 0) return Alert.alert('Required', 'Enter a valid price.');
+    setCartItems(prev => [...prev, { id: cartLocalId, name, price }]);
+    setCartLocalId(n => n + 1);
+    setCartItemName('');
+    setCartItemPrice('');
+  };
+
+  const removeCartItem = (id) => {
+    setCartItems(prev => prev.filter(x => x.id !== id));
+    if (editingItemId === id) setEditingItemId(null);
+  };
+
+  const commitPriceEdit = () => {
+    if (editingItemId == null) return;
+    const val = parseFloat(editingPrice);
+    setCartItems(prev => prev.map(x => x.id === editingItemId ? { ...x, price: isNaN(val) ? 0 : val } : x));
+    setEditingItemId(null);
+    setEditingPrice('');
+  };
+
+  const saveCart = async () => {
+    triggerHaptic();
+    const name = cartName.trim();
+    if (!name)                 return Alert.alert('Required', 'Enter a cart name.');
+    if (cartItems.length === 0) return Alert.alert('Required', 'Add at least one item to save.');
+    const uid = userRef.current?.uid;
+    if (!uid) return;
+    const total = cartItems.reduce((s, x) => s + (x.price || 0), 0);
+    const items = cartItems.map(({ name, price }) => ({ name, price: price || 0 }));
+    try {
+      const ref = await firebase.firestore()
+        .collection('users').doc(uid).collection('savedCarts')
+        .add({ name, items, total, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      setSavedCarts(prev => [{ id: ref.id, name, items, total, createdAt: new Date() }, ...prev]);
+      setCartName('');
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1400);
+    } catch (err) { Alert.alert('Save error', err.message); }
+  };
+
+  const loadCart = (cart) => {
+    setCartItems(cart.items.map((item, i) => ({ id: i + 1, name: item.name, price: item.price })));
+    setCartLocalId(cart.items.length + 1);
+    setCartName(cart.name);
+    setEditingItemId(null);
+  };
+
+  const deleteCart = (cartId) => {
+    Alert.alert('Delete cart?', '', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        const uid = userRef.current?.uid;
+        if (!uid) return;
+        try {
+          await firebase.firestore().collection('users').doc(uid).collection('savedCarts').doc(cartId).delete();
+          setSavedCarts(prev => prev.filter(x => x.id !== cartId));
+          if (expandedCartId === cartId) setExpandedCartId(null);
+        } catch (err) { Alert.alert('Delete error', err.message); }
+      }},
+    ]);
+  };
+
   // ── Derived metrics ─────────────────────────────────────────────────────────
 
   const totalSpent    = inventory.reduce((s, x) => s + x.cost, 0);
@@ -272,6 +387,9 @@ export default function MealCostTrackerScreen() {
   const calcTakeoutCost   = takeoutItems.reduce((s, item) => s + (parseFloat(mTakeoutIngs[item.id])||0) * item.costPerUnit, 0);
   const usedTakeoutCount  = takeoutItems.filter(item => parseFloat(mTakeoutIngs[item.id]) > 0).length;
   const fCostPreview      = (parseFloat(fCost)||0) / (parseFloat(fUnits)||1);
+  const cartTotal         = cartItems.reduce((s, x) => s + (x.price || 0), 0);
+
+  const chevronRotate = chevronAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '-90deg'] });
 
   // ── Stats ───────────────────────────────────────────────────────────────────
 
@@ -422,12 +540,12 @@ export default function MealCostTrackerScreen() {
 
         {/* ── Metrics ──────────────────────────────────────────────────── */}
         <View style={st.metRow}>
-          <MetCard label="Total Spent"  value={fmt$(totalSpent)}                        sub="all food"     color={c.amber} c={c} />
+          <MetCard label="Total Spent"  value={fmt$(totalSpent)}                           sub="all food"     color={c.amber} c={c} />
           <MetCard label="Avg / Meal"   value={avgMeal    != null ? fmt$(avgMeal)    : '—'} sub="all meals"    color={c.blue}  c={c} />
           <MetCard label="Avg Home"     value={avgHome    != null ? fmt$(avgHome)    : '—'} sub="cooked"       color={c.green} c={c} />
           <MetCard label="Avg Takeout"  value={avgTakeout != null ? fmt$(avgTakeout) : '—'} sub="per meal"     color={c.amber} c={c} />
-          <MetCard label="Meals"        value={String(meals.length)}                    sub="logged"       c={c} />
-          <MetCard label="Savings"      value={totalSaved != null ? fmt$(totalSaved) : '—'} sub="vs takeout" color={c.green} c={c} />
+          <MetCard label="Meals"        value={String(meals.length)}                        sub="logged"       c={c} />
+          <MetCard label="Savings"      value={totalSaved != null ? fmt$(totalSaved) : '—'} sub="vs takeout"   color={c.green} c={c} />
         </View>
 
         {/* ── Tabs ─────────────────────────────────────────────────────── */}
@@ -435,7 +553,8 @@ export default function MealCostTrackerScreen() {
           {[
             { key: 'grocery', label: 'Groceries', color: c.green, bg: c.greenGlow },
             { key: 'meal',    label: 'Log Meal',  color: c.amber, bg: c.amberGlow },
-            { key: 'stats',   label: 'Stats',     color: c.blue,  bg: c.blueGlow  },
+            { key: 'cart',    label: 'Cart',       color: c.blue,  bg: c.blueGlow  },
+            { key: 'stats',   label: 'Stats',      color: c.blue,  bg: c.blueGlow  },
           ].map(tab => (
             <TouchableOpacity key={tab.key} onPress={() => setActiveTab(tab.key)}
               style={[st.tabBtn, {
@@ -543,51 +662,60 @@ export default function MealCostTrackerScreen() {
               </>
             )}
 
-            <Text style={[st.secLabel, { color: c.textMuted, borderBottomColor: c.borderSubtle, fontFamily: MONO }]}>
-              INVENTORY ({inventory.length} ITEMS)
-            </Text>
+            {/* Collapsible inventory header */}
+            <TouchableOpacity onPress={toggleInventory}
+              style={[st.secLabelRow, { borderBottomColor: c.borderSubtle }]}>
+              <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 0.8, color: c.textMuted, fontFamily: MONO }}>
+                INVENTORY ({inventory.length} ITEMS)
+              </Text>
+              <Animated.Text style={[st.chevron, { color: c.textMuted, transform: [{ rotate: chevronRotate }] }]}>
+                ▾
+              </Animated.Text>
+            </TouchableOpacity>
 
-            {inventory.length === 0 ? (
-              <View style={[st.emptyBox, { borderColor: c.borderSubtle }]}>
-                <Text style={[st.emptyTxt, { color: c.textMuted, fontFamily: MONO }]}>No items yet. Add your first purchase above.</Text>
-              </View>
-            ) : (
-              <View style={st.invGrid}>
-                {inventory.map(item => {
-                  const pct      = item.totalUnits > 0 ? Math.max(0, Math.min(100, (item.remainingUnits / item.totalUnits) * 100)) : 0;
-                  const barColor = pct > 50 ? c.green : pct > 20 ? c.amber : c.red;
-                  return (
-                    <View key={item.id} style={[st.invCard, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
-                      <TouchableOpacity style={st.invDel} onPress={() => deleteInventoryItem(item.id)}>
-                        <Text style={{ color: c.textMuted, fontSize: 12 }}>✕</Text>
-                      </TouchableOpacity>
-                      <View style={[st.invTag, {
-                        backgroundColor: item.type === 'takeout' ? c.amberGlow : c.greenGlow,
-                        borderColor:     item.type === 'takeout' ? c.amber     : c.green,
-                      }]}>
-                        <Text style={[st.invTagTxt, { color: item.type === 'takeout' ? c.amber : c.green, fontFamily: MONO }]}>
-                          {item.type.toUpperCase()}
+            {!invCollapsed && (
+              inventory.length === 0 ? (
+                <View style={[st.emptyBox, { borderColor: c.borderSubtle }]}>
+                  <Text style={[st.emptyTxt, { color: c.textMuted, fontFamily: MONO }]}>No items yet. Add your first purchase above.</Text>
+                </View>
+              ) : (
+                <View style={st.invGrid}>
+                  {inventory.map(item => {
+                    const pct      = item.totalUnits > 0 ? Math.max(0, Math.min(100, (item.remainingUnits / item.totalUnits) * 100)) : 0;
+                    const barColor = pct > 50 ? c.green : pct > 20 ? c.amber : c.red;
+                    return (
+                      <View key={item.id} style={[st.invCard, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+                        <TouchableOpacity style={st.invDel} onPress={() => deleteInventoryItem(item.id)}>
+                          <Text style={{ color: c.textMuted, fontSize: 12 }}>✕</Text>
+                        </TouchableOpacity>
+                        <View style={[st.invTag, {
+                          backgroundColor: item.type === 'takeout' ? c.amberGlow : c.greenGlow,
+                          borderColor:     item.type === 'takeout' ? c.amber     : c.green,
+                        }]}>
+                          <Text style={[st.invTagTxt, { color: item.type === 'takeout' ? c.amber : c.green, fontFamily: MONO }]}>
+                            {item.type.toUpperCase()}
+                          </Text>
+                        </View>
+                        <Text style={[st.invName, { color: c.textPrimary, fontFamily: MONO }]} numberOfLines={1}>{item.name}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 2 }}>
+                          <Text style={[st.invPrice, { color: c.green, fontFamily: MONO }]}>{fmt$(item.costPerUnit)}</Text>
+                          <Text style={[st.invPriceUnit, { color: c.textMuted, fontFamily: MONO }]}>/ {item.unitName}</Text>
+                        </View>
+                        <Text style={[st.invMeta, { color: c.textMuted, fontFamily: MONO }]}>
+                          {fmt$(item.cost)} total · {item.totalUnits} {item.unitName}
                         </Text>
+                        <Text style={[{ fontSize: 11, fontWeight: '600', color: barColor, fontFamily: MONO }]}>
+                          {item.remainingUnits.toFixed(1)} {item.unitName} left
+                        </Text>
+                        {item.notes ? <Text style={[st.invMeta, { color: c.textMuted, fontFamily: MONO, fontStyle: 'italic' }]}>{item.notes}</Text> : null}
+                        <View style={[st.stockTrack, { backgroundColor: c.bgBase }]}>
+                          <View style={[st.stockFill, { width: `${pct}%`, backgroundColor: barColor }]} />
+                        </View>
                       </View>
-                      <Text style={[st.invName, { color: c.textPrimary, fontFamily: MONO }]} numberOfLines={1}>{item.name}</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 2 }}>
-                        <Text style={[st.invPrice, { color: c.green, fontFamily: MONO }]}>{fmt$(item.costPerUnit)}</Text>
-                        <Text style={[st.invPriceUnit, { color: c.textMuted, fontFamily: MONO }]}>/ {item.unitName}</Text>
-                      </View>
-                      <Text style={[st.invMeta, { color: c.textMuted, fontFamily: MONO }]}>
-                        {fmt$(item.cost)} total · {item.totalUnits} {item.unitName}
-                      </Text>
-                      <Text style={[{ fontSize: 11, fontWeight: '600', color: barColor, fontFamily: MONO }]}>
-                        {item.remainingUnits.toFixed(1)} {item.unitName} left
-                      </Text>
-                      {item.notes ? <Text style={[st.invMeta, { color: c.textMuted, fontFamily: MONO, fontStyle: 'italic' }]}>{item.notes}</Text> : null}
-                      <View style={[st.stockTrack, { backgroundColor: c.bgBase }]}>
-                        <View style={[st.stockFill, { width: `${pct}%`, backgroundColor: barColor }]} />
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
+                    );
+                  })}
+                </View>
+              )
             )}
           </>
         )}
@@ -806,6 +934,162 @@ export default function MealCostTrackerScreen() {
         )}
 
         {/* ══════════════════════════════════════════════════════════════ */}
+        {/* CART TAB                                                      */}
+        {/* ══════════════════════════════════════════════════════════════ */}
+        {activeTab === 'cart' && (
+          <>
+            <View style={[st.card, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+              <Text style={[st.cardTitle, { color: c.textMuted, fontFamily: MONO }]}>GROCERY CART CALCULATOR</Text>
+
+              {/* Add item row */}
+              <View style={[st.formRow, { alignItems: 'flex-end' }]}>
+                <View style={{ flex: 2 }}>
+                  <FLabel label="Item" c={c} />
+                  <TextInput
+                    style={[st.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
+                    value={cartItemName} onChangeText={setCartItemName}
+                    placeholder="e.g. Chicken breast" placeholderTextColor={c.textMuted}
+                    returnKeyType="next"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <FLabel label="Price ($)" c={c} />
+                  <TextInput
+                    style={[st.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.green, fontFamily: MONO }]}
+                    value={cartItemPrice} onChangeText={setCartItemPrice}
+                    placeholder="0.00" placeholderTextColor={c.textMuted}
+                    keyboardType="decimal-pad" returnKeyType="done" onSubmitEditing={addCartItem}
+                  />
+                </View>
+                <TouchableOpacity
+                  style={[st.addItemBtn, { backgroundColor: c.blueGlow, borderColor: c.blue }]}
+                  onPress={addCartItem}>
+                  <Text style={{ color: c.blue, fontSize: 18, fontWeight: '700' }}>+</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Item list */}
+              {cartItems.length === 0 ? (
+                <View style={[st.emptyBox, { borderColor: c.borderSubtle, marginTop: 8 }]}>
+                  <Text style={[st.emptyTxt, { color: c.textMuted, fontFamily: MONO }]}>
+                    Your cart is empty. Add items above.
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  {cartItems.map(item => (
+                    <View key={item.id} style={[st.cartRow, { borderBottomColor: c.borderSubtle }]}>
+                      <Text style={[st.cartItemName, { color: c.textPrimary, fontFamily: MONO }]} numberOfLines={1}>
+                        {item.name}
+                      </Text>
+                      {editingItemId === item.id ? (
+                        <TextInput
+                          style={[st.cartPriceInput, { borderColor: c.blue, backgroundColor: c.bgBase, color: c.green, fontFamily: MONO }]}
+                          value={editingPrice}
+                          onChangeText={setEditingPrice}
+                          onBlur={commitPriceEdit}
+                          onSubmitEditing={commitPriceEdit}
+                          keyboardType="decimal-pad"
+                          autoFocus
+                        />
+                      ) : (
+                        <TouchableOpacity onPress={() => { setEditingItemId(item.id); setEditingPrice(String(item.price)); }}>
+                          <Text style={[st.cartPrice, { color: c.green, fontFamily: MONO }]}>{fmt$(item.price)}</Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity onPress={() => removeCartItem(item.id)} style={{ padding: 6 }}>
+                        <Text style={{ color: c.textMuted, fontSize: 14 }}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+
+                  {/* Running total */}
+                  <View style={[st.cartTotalRow, { borderTopColor: c.borderSubtle }]}>
+                    <Text style={[st.cartTotalLabel, { color: c.textMuted, fontFamily: MONO }]}>TOTAL</Text>
+                    <Text style={[st.cartTotalVal, { color: c.green, fontFamily: MONO }]}>{fmt$(cartTotal)}</Text>
+                  </View>
+                </>
+              )}
+
+              {/* Save cart */}
+              <View style={[st.formRow, { alignItems: 'flex-end', marginTop: 4 }]}>
+                <View style={{ flex: 1 }}>
+                  <FLabel label="Cart Name" c={c} />
+                  <TextInput
+                    style={[st.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
+                    value={cartName} onChangeText={setCartName}
+                    placeholder="e.g. Weekly Haul, Costco Run..." placeholderTextColor={c.textMuted}
+                  />
+                </View>
+                <TouchableOpacity
+                  style={[st.actionBtn, { backgroundColor: c.blueGlow, borderColor: c.blue, marginTop: 0 }]}
+                  onPress={saveCart}>
+                  <Text style={[st.actionBtnTxt, { color: c.blue, fontFamily: MONO }]}>Save Cart</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Saved carts list */}
+            <Text style={[st.secLabel, { color: c.textMuted, borderBottomColor: c.borderSubtle, fontFamily: MONO }]}>
+              SAVED CARTS ({savedCarts.length})
+            </Text>
+
+            {savedCarts.length === 0 ? (
+              <View style={[st.emptyBox, { borderColor: c.borderSubtle }]}>
+                <Text style={[st.emptyTxt, { color: c.textMuted, fontFamily: MONO }]}>
+                  No saved carts yet. Build a cart above and save it.
+                </Text>
+              </View>
+            ) : (
+              savedCarts.map(cart => (
+                <View key={cart.id} style={[st.card, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+                  <TouchableOpacity
+                    onPress={() => setExpandedCartId(expandedCartId === cart.id ? null : cart.id)}
+                    style={st.cartCardHeader}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[st.cartCardName, { color: c.textPrimary, fontFamily: MONO }]}>{cart.name}</Text>
+                      <Text style={[st.cartCardMeta, { color: c.textMuted, fontFamily: MONO }]}>
+                        {cart.items.length} item{cart.items.length !== 1 ? 's' : ''} · {fmt$(cart.total)}
+                      </Text>
+                    </View>
+                    <Text style={{ color: c.textMuted, fontSize: 16 }}>
+                      {expandedCartId === cart.id ? '▴' : '▾'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {expandedCartId === cart.id && (
+                    <>
+                      {cart.items.map((item, i) => (
+                        <View key={i} style={[st.savedCartItem, { borderBottomColor: c.borderSubtle }]}>
+                          <Text style={[{ flex: 1, fontSize: 12, color: c.textPrimary, fontFamily: MONO }]} numberOfLines={1}>
+                            {item.name}
+                          </Text>
+                          <Text style={[{ fontSize: 12, fontWeight: '600', color: c.green, fontFamily: MONO }]}>
+                            {fmt$(item.price)}
+                          </Text>
+                        </View>
+                      ))}
+                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                        <TouchableOpacity
+                          onPress={() => loadCart(cart)}
+                          style={[st.cartActionBtn, { borderColor: c.blue, backgroundColor: c.blueGlow }]}>
+                          <Text style={[{ color: c.blue, fontSize: 11, fontWeight: '700', fontFamily: MONO }]}>LOAD INTO CART</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => deleteCart(cart.id)}
+                          style={[st.cartActionBtn, { borderColor: c.red, backgroundColor: 'transparent' }]}>
+                          <Text style={[{ color: c.red, fontSize: 11, fontWeight: '700', fontFamily: MONO }]}>DELETE</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  )}
+                </View>
+              ))
+            )}
+          </>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════ */}
         {/* STATS TAB                                                     */}
         {/* ══════════════════════════════════════════════════════════════ */}
         {activeTab === 'stats' && renderStats()}
@@ -831,7 +1115,11 @@ const st = StyleSheet.create({
 
   card:      { borderWidth: 1, borderRadius: 10, padding: 14, marginBottom: 8 },
   cardTitle: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, marginBottom: 10 },
-  secLabel:  { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, marginTop: 14, marginBottom: 8, paddingBottom: 6, borderBottomWidth: 1 },
+
+  secLabel:    { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, marginTop: 14, marginBottom: 8, paddingBottom: 6, borderBottomWidth: 1 },
+  // Collapsible inventory header — same spacing as secLabel but row layout
+  secLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, marginBottom: 8, paddingBottom: 6, borderBottomWidth: 1 },
+  chevron:     { fontSize: 16, fontWeight: '700' },
 
   formRow:   { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
   input:     { borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 7, fontSize: 12, marginBottom: 2 },
@@ -889,6 +1177,21 @@ const st = StyleSheet.create({
   mealPill:   { borderWidth: 1, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 },
   mealPillTxt:{ fontSize: 9, fontWeight: '700', letterSpacing: 0.4 },
   mealDate:   { fontSize: 10 },
+
+  // Cart calculator
+  addItemBtn:    { borderWidth: 1.5, borderRadius: 8, width: 38, height: 34, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
+  cartRow:       { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, borderBottomWidth: 1 },
+  cartItemName:  { flex: 1, fontSize: 12, fontWeight: '600' },
+  cartPrice:     { fontSize: 13, fontWeight: '700', minWidth: 56, textAlign: 'right' },
+  cartPriceInput:{ width: 72, borderWidth: 1, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 4, fontSize: 12, textAlign: 'right' },
+  cartTotalRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 10, marginTop: 6, borderTopWidth: 1 },
+  cartTotalLabel:{ fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
+  cartTotalVal:  { fontSize: 24, fontWeight: '700', letterSpacing: -0.5 },
+  cartCardHeader:{ flexDirection: 'row', alignItems: 'center', gap: 8 },
+  cartCardName:  { fontSize: 13, fontWeight: '700', marginBottom: 2 },
+  cartCardMeta:  { fontSize: 10 },
+  savedCartItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, gap: 8 },
+  cartActionBtn: { flex: 1, borderWidth: 1, borderRadius: 20, paddingVertical: 7, alignItems: 'center' },
 
   // Stats
   savingsBanner: { borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 10 },
