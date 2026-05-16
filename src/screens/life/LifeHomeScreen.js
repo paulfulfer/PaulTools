@@ -62,7 +62,7 @@ export default function LifeHomeScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  content:      { paddingBottom: 80 },
+  content:      { paddingBottom: 32 },
   hero:         { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 28 },
   heroTitle:    { fontSize: 28, fontWeight: '700', letterSpacing: -0.5, marginBottom: 4, fontFamily: 'Inter_700Bold' },
   heroSub:      { fontSize: 13, fontFamily: 'Inter_400Regular' },

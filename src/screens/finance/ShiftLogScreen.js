@@ -377,30 +377,13 @@ export default function ShiftLogScreen() {
 
         {/* ── Metrics ─────────────────────────────────── */}
         <View style={s.metRow}>
-          <MetCard
-            label="Hours & Shifts"
-            value={`${totalHours.toFixed(1)} hrs  ·  ${shifts.length} shifts`}
-            sub="all time"
-            color={c.blue}
-            fontSize={14}
-            c={c}
-          />
-          <MetCard
-            label="Gross Earnings"
-            value={`${fmt$(totalGross)} total  ·  ${fmt$(weekGross(shifts, jobs))} this week`}
-            sub="before tax"
-            color={c.green}
-            fontSize={13}
-            c={c}
-          />
-          <MetCard
-            label="After-Tax Est."
-            value={`${fmt$(afterTax)} est. take-home`}
-            sub="~23.7% effective rate"
-            color={c.teal}
-            fontSize={14}
-            c={c}
-          />
+          <MetCard label="Total Hours"  value={totalHours.toFixed(1)}         sub="all jobs"   color={c.blue}        c={c} />
+          <MetCard label="Shifts"       value={String(shifts.length)}         sub="all time"   color={c.textPrimary} c={c} />
+          <MetCard label="Total Gross"  value={fmt$(totalGross)}              sub="before tax" color={c.green}       c={c} />
+          <MetCard label="This Week"    value={fmt$(weekGross(shifts, jobs))} sub="gross"      color={c.amber}       c={c} />
+        </View>
+        <View style={s.metRow}>
+          <MetCard label="Est. Take-Home" value={fmt$(afterTax)} sub="~23.7% effective rate" color={c.teal} c={c} />
         </View>
 
         {/* ── Per-Job Breakdown ───────────────────────── */}

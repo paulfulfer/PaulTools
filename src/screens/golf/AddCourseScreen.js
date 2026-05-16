@@ -511,7 +511,7 @@ export default function AddCourseScreen({ navigation }) {
 }
 
 const s = StyleSheet.create({
-  scroll:     { padding: 16, paddingBottom: 80 },
+  scroll:     { padding: 16 },
   stepTitle:  { fontSize: 20, marginBottom: 4 },
   stepHint:   { fontSize: 12, lineHeight: 18, marginBottom: 4 },
 

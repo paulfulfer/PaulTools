@@ -204,7 +204,7 @@ function Chip({ label, color, c }) {
 const s = StyleSheet.create({
   searchRow:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1 },
   searchInput: { flex: 1, fontSize: 13, paddingVertical: 0 },
-  scroll:      { padding: 14, paddingBottom: 80 },
+  scroll:      { padding: 14 },
 
   card:    { borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 10 },
   cardTop: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8 },
@@ -223,6 +223,6 @@ const s = StyleSheet.create({
   emptyTitle: { fontSize: 18, marginBottom: 8, textAlign: 'center' },
   emptySub:   { fontSize: 12, textAlign: 'center', lineHeight: 18 },
 
-  fab:    { position: 'absolute', bottom: 90, right: 20, width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', elevation: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowRadius: 8, shadowOpacity: 0.25 },
+  fab:    { position: 'absolute', bottom: 24, right: 20, width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', elevation: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowRadius: 8, shadowOpacity: 0.25 },
   fabTxt: { fontSize: 30, fontWeight: '300', lineHeight: 34, marginTop: -2 },
 });
