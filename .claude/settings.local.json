@@ -10,7 +10,8 @@
       "Bash(npm uninstall *)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(node -e \"const a=require\\('./app.json'\\); console.log\\(JSON.stringify\\(a.expo.plugins,null,2\\)\\)\")"
     ]
   }
 }
