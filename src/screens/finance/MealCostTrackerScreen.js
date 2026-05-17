@@ -71,8 +71,11 @@ export default function MealCostTrackerScreen() {
 
   // ── UI state ────────────────────────────────────────────────────────────────
   const [activeTab,    setActiveTab]    = useState('grocery');
-  const [invCollapsed, setInvCollapsed] = useState(false);
-  const chevronAnim = useRef(new Animated.Value(0)).current;
+  const [invCollapsed,   setInvCollapsed]   = useState(false);
+  const [archivedItems,  setArchivedItems]  = useState([]);
+  const [archCollapsed,  setArchCollapsed]  = useState(true);
+  const chevronAnim     = useRef(new Animated.Value(0)).current;
+  const archChevronAnim = useRef(new Animated.Value(1)).current; // starts collapsed
 
   // ── Grocery form ────────────────────────────────────────────────────────────
   const [fDate,     setFDate]     = useState(new Date());
@@ -108,14 +111,16 @@ export default function MealCostTrackerScreen() {
   const [cartLocalId,    setCartLocalId]    = useState(1);
 
   // ── Refs (stale-closure guard for async handlers) ───────────────────────────
-  const invRef   = useRef(inventory);
-  const mealsRef = useRef(meals);
-  const idCRef   = useRef(idC);
-  const userRef  = useRef(user);
-  useEffect(() => { invRef.current   = inventory; }, [inventory]);
-  useEffect(() => { mealsRef.current = meals;     }, [meals]);
-  useEffect(() => { idCRef.current   = idC;       }, [idC]);
-  useEffect(() => { userRef.current  = user;      }, [user]);
+  const invRef      = useRef(inventory);
+  const mealsRef    = useRef(meals);
+  const idCRef      = useRef(idC);
+  const userRef     = useRef(user);
+  const archivedRef = useRef(archivedItems);
+  useEffect(() => { invRef.current      = inventory;     }, [inventory]);
+  useEffect(() => { mealsRef.current    = meals;         }, [meals]);
+  useEffect(() => { idCRef.current      = idC;           }, [idC]);
+  useEffect(() => { userRef.current     = user;          }, [user]);
+  useEffect(() => { archivedRef.current = archivedItems; }, [archivedItems]);
 
   // ── Firestore ───────────────────────────────────────────────────────────────
 
@@ -125,13 +130,14 @@ export default function MealCostTrackerScreen() {
     return firebase.firestore().collection('users').doc(uid).collection('localStorage').doc('data');
   };
 
-  const writeAll = async (inv, mls, id) => {
+  const writeAll = async (inv, mls, id, arc) => {
     const ref = docRef();
     if (!ref) return;
     await ref.set({
       meal_inventory: JSON.stringify(inv),
       meal_meals:     JSON.stringify(mls),
       meal_id:        String(id),
+      meal_archived:  JSON.stringify(arc ?? archivedRef.current),
     }, { merge: true });
     setSaved(true);
     setTimeout(() => setSaved(false), 1400);
@@ -149,6 +155,19 @@ export default function MealCostTrackerScreen() {
       setInventory(JSON.parse(d.meal_inventory || '[]'));
       setMeals(JSON.parse(d.meal_meals || '[]'));
       setIdC(parseInt(d.meal_id || '1', 10));
+
+      // Load archive, purge items older than 7 days
+      const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      let loadedArchived = JSON.parse(d.meal_archived || '[]');
+      const beforeCleanup = loadedArchived.length;
+      loadedArchived = loadedArchived.filter(
+        x => !x.archivedAt || (now - new Date(x.archivedAt).getTime()) < SEVEN_DAYS
+      );
+      setArchivedItems(loadedArchived);
+      if (loadedArchived.length < beforeCleanup) {
+        await ref.set({ meal_archived: JSON.stringify(loadedArchived) }, { merge: true });
+      }
 
       // Restore inventory collapse preference
       const collapsed = await AsyncStorage.getItem('meal_inventory_collapsed');
@@ -181,6 +200,17 @@ export default function MealCostTrackerScreen() {
       useNativeDriver: true,
     }).start();
     AsyncStorage.setItem('meal_inventory_collapsed', String(next));
+  };
+
+  const toggleArchive = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    const next = !archCollapsed;
+    setArchCollapsed(next);
+    Animated.timing(archChevronAnim, {
+      toValue: next ? 1 : 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
   };
 
   const addPurchase = async () => {
@@ -268,6 +298,16 @@ export default function MealCostTrackerScreen() {
       }
     }
 
+    // Auto-archive inventory items that hit 0 units from this meal
+    const nowTs = new Date().toISOString();
+    const usedIds = new Set(ingredientsList.map(x => x.id).filter(Boolean));
+    const toArchive  = updatedInv.filter(x => usedIds.has(x.id) && x.remainingUnits === 0);
+    const finalInv   = updatedInv.filter(x => !(usedIds.has(x.id) && x.remainingUnits === 0));
+    const newArchived = [
+      ...archivedRef.current,
+      ...toArchive.map(x => ({ ...x, archived: true, archivedAt: nowTs })),
+    ];
+
     const meal = {
       id: newId++,
       name: mName.trim(),
@@ -279,13 +319,14 @@ export default function MealCostTrackerScreen() {
     };
 
     const updatedMeals = [meal, ...mealsRef.current];
-    setInventory(updatedInv);
+    setInventory(finalInv);
+    setArchivedItems(newArchived);
     setMeals(updatedMeals);
     setIdC(newId);
     setMealIngs({});
     setMTakeoutIngs({});
     setMName(''); setMNotes(''); setMToCost(''); setMToPortions('1'); setMToAddInv(false);
-    try { await writeAll(updatedInv, updatedMeals, newId); }
+    try { await writeAll(finalInv, updatedMeals, newId, newArchived); }
     catch (err) { Alert.alert('Save error', err.message); }
   };
 
@@ -299,6 +340,34 @@ export default function MealCostTrackerScreen() {
         catch (err) { Alert.alert('Save error', err.message); }
       }},
     ]);
+  };
+
+  // ── Archive handlers ──────────────────────────────────────────────────────────
+
+  const deleteArchivedItem = (id) => {
+    Alert.alert('Delete item?', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        const newArchived = archivedRef.current.filter(x => x.id !== id);
+        setArchivedItems(newArchived);
+        try { await writeAll(invRef.current, mealsRef.current, idCRef.current, newArchived); }
+        catch (err) { Alert.alert('Save error', err.message); }
+      }},
+    ]);
+  };
+
+  const restoreArchivedItem = async (id) => {
+    const item = archivedRef.current.find(x => x.id === id);
+    if (!item) return;
+    // eslint-disable-next-line no-unused-vars
+    const { archived, archivedAt, ...rest } = item;
+    const restored    = { ...rest, remainingUnits: 0 };
+    const newActive   = [...invRef.current, restored];
+    const newArchived = archivedRef.current.filter(x => x.id !== id);
+    setInventory(newActive);
+    setArchivedItems(newArchived);
+    try { await writeAll(newActive, mealsRef.current, idCRef.current, newArchived); }
+    catch (err) { Alert.alert('Save error', err.message); }
   };
 
   // ── Cart handlers ─────────────────────────────────────────────────────────────
@@ -389,7 +458,8 @@ export default function MealCostTrackerScreen() {
   const fCostPreview      = (parseFloat(fCost)||0) / (parseFloat(fUnits)||1);
   const cartTotal         = cartItems.reduce((s, x) => s + (x.price || 0), 0);
 
-  const chevronRotate = chevronAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '-90deg'] });
+  const chevronRotate     = chevronAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '-90deg'] });
+  const archChevronRotate = archChevronAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '-90deg'] });
 
   // ── Stats ───────────────────────────────────────────────────────────────────
 
@@ -715,6 +785,62 @@ export default function MealCostTrackerScreen() {
                     );
                   })}
                 </View>
+              )
+            )}
+
+            {/* ── Archived section ── */}
+            <TouchableOpacity onPress={toggleArchive}
+              style={[st.secLabelRow, { borderBottomColor: c.borderSubtle }]}>
+              <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 0.8, color: c.textMuted, fontFamily: MONO }}>
+                ARCHIVED ({archivedItems.length} ITEMS)
+              </Text>
+              <Animated.Text style={[st.chevron, { color: c.textMuted, transform: [{ rotate: archChevronRotate }] }]}>
+                ▾
+              </Animated.Text>
+            </TouchableOpacity>
+
+            {!archCollapsed && (
+              archivedItems.length === 0 ? (
+                <View style={[st.emptyBox, { borderColor: c.borderSubtle }]}>
+                  <Text style={[st.emptyTxt, { color: c.textMuted, fontFamily: MONO }]}>No archived items.</Text>
+                </View>
+              ) : (
+                archivedItems.map(item => {
+                  const archivedDate = item.archivedAt ? new Date(item.archivedAt) : new Date();
+                  const msLeft  = (7 * 24 * 60 * 60 * 1000) - (Date.now() - archivedDate.getTime());
+                  const daysLeft = Math.max(0, Math.ceil(msLeft / 86400000));
+                  return (
+                    <View key={item.id} style={[st.archCard, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
+                      <View style={[st.invTag, {
+                        backgroundColor: item.type === 'takeout' ? c.amberGlow : c.greenGlow,
+                        borderColor:     item.type === 'takeout' ? c.amber     : c.green,
+                        opacity: 0.5,
+                      }]}>
+                        <Text style={[st.invTagTxt, { color: item.type === 'takeout' ? c.amber : c.green, fontFamily: MONO }]}>
+                          {item.type.toUpperCase()}
+                        </Text>
+                      </View>
+                      <Text style={[st.archName, { color: c.textMuted, fontFamily: MONO }]} numberOfLines={1}>{item.name}</Text>
+                      <Text style={[st.archMeta, { color: c.textMuted, fontFamily: MONO }]}>
+                        {'Archived ' + archivedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        {' · '}
+                        {daysLeft > 0 ? `Deletes in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}` : 'Deletes today'}
+                      </Text>
+                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                        <TouchableOpacity
+                          onPress={() => restoreArchivedItem(item.id)}
+                          style={[st.archBtn, { borderColor: c.green, backgroundColor: c.greenGlow }]}>
+                          <Text style={{ color: c.green, fontSize: 10, fontWeight: '700', fontFamily: MONO }}>RESTORE</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => deleteArchivedItem(item.id)}
+                          style={[st.archBtn, { borderColor: c.red, backgroundColor: 'transparent' }]}>
+                          <Text style={{ color: c.red, fontSize: 10, fontWeight: '700', fontFamily: MONO }}>DELETE NOW</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })
               )
             )}
           </>
@@ -1214,4 +1340,10 @@ const st = StyleSheet.create({
 
   emptyBox: { borderWidth: 1, borderStyle: 'dashed', borderRadius: 8, padding: 24, alignItems: 'center', marginBottom: 8 },
   emptyTxt: { fontSize: 12 },
+
+  // Archive
+  archCard: { borderWidth: 1, borderRadius: 10, padding: 11, marginBottom: 6, opacity: 0.75 },
+  archName: { fontSize: 12, fontWeight: '600', marginBottom: 2, marginTop: 4 },
+  archMeta: { fontSize: 10, lineHeight: 15 },
+  archBtn:  { flex: 1, borderWidth: 1, borderRadius: 16, paddingVertical: 6, alignItems: 'center' },
 });
