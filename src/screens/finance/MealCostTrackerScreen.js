@@ -7,6 +7,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import MealPlannerCartTab from './MealPlannerCartTab';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
@@ -100,17 +101,6 @@ export default function MealCostTrackerScreen() {
   const [mTakeoutIngs, setMTakeoutIngs] = useState({});
   const [showMDate,    setShowMDate]   = useState(false);
 
-  // ── Cart ─────────────────────────────────────────────────────────────────────
-  const [cartItems,      setCartItems]      = useState([]);
-  const [cartItemName,   setCartItemName]   = useState('');
-  const [cartItemPrice,  setCartItemPrice]  = useState('');
-  const [cartName,       setCartName]       = useState('');
-  const [savedCarts,     setSavedCarts]     = useState([]);
-  const [expandedCartId, setExpandedCartId] = useState(null);
-  const [editingItemId,  setEditingItemId]  = useState(null);
-  const [editingPrice,   setEditingPrice]   = useState('');
-  const [cartLocalId,    setCartLocalId]    = useState(1);
-
   // ── Barcode scanner (Android only) ───────────────────────────────────────────
   const [scannerOpen,  setScannerOpen]  = useState(false);
   const [scannedImage, setScannedImage] = useState(null);
@@ -184,14 +174,6 @@ export default function MealCostTrackerScreen() {
         chevronAnim.setValue(1);
       }
 
-      // Load saved carts
-      const uid = userRef.current?.uid;
-      if (uid) {
-        const cartsSnap = await firebase.firestore()
-          .collection('users').doc(uid).collection('savedCarts')
-          .orderBy('createdAt', 'desc').get();
-        setSavedCarts(cartsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }
     } catch (err) { Alert.alert('Load error', err.message); }
     finally { setLoading(false); }
   };
@@ -419,72 +401,28 @@ export default function MealCostTrackerScreen() {
     catch (err) { Alert.alert('Save error', err.message); }
   };
 
-  // ── Cart handlers ─────────────────────────────────────────────────────────────
+  // ── Log cart to inventory (callback for MealPlannerCartTab) ──────────────────
 
-  const addCartItem = () => {
-    const name  = cartItemName.trim();
-    const price = parseFloat(cartItemPrice);
-    if (!name)                     return Alert.alert('Required', 'Enter an item name.');
-    if (isNaN(price) || price < 0) return Alert.alert('Required', 'Enter a valid price.');
-    setCartItems(prev => [...prev, { id: cartLocalId, name, price }]);
-    setCartLocalId(n => n + 1);
-    setCartItemName('');
-    setCartItemPrice('');
-  };
-
-  const removeCartItem = (id) => {
-    setCartItems(prev => prev.filter(x => x.id !== id));
-    if (editingItemId === id) setEditingItemId(null);
-  };
-
-  const commitPriceEdit = () => {
-    if (editingItemId == null) return;
-    const val = parseFloat(editingPrice);
-    setCartItems(prev => prev.map(x => x.id === editingItemId ? { ...x, price: isNaN(val) ? 0 : val } : x));
-    setEditingItemId(null);
-    setEditingPrice('');
-  };
-
-  const saveCart = async () => {
-    triggerHaptic();
-    const name = cartName.trim();
-    if (!name)                 return Alert.alert('Required', 'Enter a cart name.');
-    if (cartItems.length === 0) return Alert.alert('Required', 'Add at least one item to save.');
-    const uid = userRef.current?.uid;
-    if (!uid) return;
-    const total = cartItems.reduce((s, x) => s + (x.price || 0), 0);
-    const items = cartItems.map(({ name, price }) => ({ name, price: price || 0 }));
-    try {
-      const ref = await firebase.firestore()
-        .collection('users').doc(uid).collection('savedCarts')
-        .add({ name, items, total, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-      setSavedCarts(prev => [{ id: ref.id, name, items, total, createdAt: new Date() }, ...prev]);
-      setCartName('');
-      setSaved(true);
-      setTimeout(() => setSaved(false), 1400);
-    } catch (err) { Alert.alert('Save error', err.message); }
-  };
-
-  const loadCart = (cart) => {
-    setCartItems(cart.items.map((item, i) => ({ id: i + 1, name: item.name, price: item.price })));
-    setCartLocalId(cart.items.length + 1);
-    setCartName(cart.name);
-    setEditingItemId(null);
-  };
-
-  const deleteCart = (cartId) => {
-    Alert.alert('Delete cart?', '', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        const uid = userRef.current?.uid;
-        if (!uid) return;
-        try {
-          await firebase.firestore().collection('users').doc(uid).collection('savedCarts').doc(cartId).delete();
-          setSavedCarts(prev => prev.filter(x => x.id !== cartId));
-          if (expandedCartId === cartId) setExpandedCartId(null);
-        } catch (err) { Alert.alert('Delete error', err.message); }
-      }},
-    ]);
+  const logCartToInventory = async (cartItemsToLog) => {
+    const now   = fmtDateKey(new Date());
+    let   newId = idCRef.current;
+    const toAdd = cartItemsToLog.map(item => ({
+      id:             newId++,
+      name:           item.name,
+      cost:           parseFloat(item.purchasePrice) || 0,
+      totalUnits:     parseFloat(item.purchaseYield) || 1,
+      remainingUnits: parseFloat(item.purchaseYield) || 1,
+      unitName:       item.unitLabel || 'serving',
+      costPerUnit:    item.costPerUnit || 0,
+      date:           now,
+      type:           item.type || 'grocery',
+      notes:          '',
+    }));
+    const newInv = [...invRef.current, ...toAdd];
+    setInventory(newInv);
+    setIdC(newId);
+    try { await writeAll(newInv, mealsRef.current, newId, archivedRef.current); }
+    catch (err) { Alert.alert('Log error', err.message); }
   };
 
   // ── Derived metrics ─────────────────────────────────────────────────────────
@@ -505,7 +443,6 @@ export default function MealCostTrackerScreen() {
   const calcTakeoutCost   = takeoutItems.reduce((s, item) => s + (parseFloat(mTakeoutIngs[item.id])||0) * item.costPerUnit, 0);
   const usedTakeoutCount  = takeoutItems.filter(item => parseFloat(mTakeoutIngs[item.id]) > 0).length;
   const fCostPreview      = (parseFloat(fCost)||0) / (parseFloat(fUnits)||1);
-  const cartTotal         = cartItems.reduce((s, x) => s + (x.price || 0), 0);
 
   const chevronRotate     = chevronAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '-90deg'] });
   const archChevronRotate = archChevronAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '-90deg'] });
@@ -1174,156 +1111,12 @@ export default function MealCostTrackerScreen() {
         {/* CART TAB                                                      */}
         {/* ══════════════════════════════════════════════════════════════ */}
         {activeTab === 'cart' && (
-          <>
-            <View style={[st.card, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
-              <Text style={[st.cardTitle, { color: c.textMuted, fontFamily: MONO }]}>GROCERY CART CALCULATOR</Text>
-
-              {/* Add item row */}
-              <View style={[st.formRow, { alignItems: 'flex-end' }]}>
-                <View style={{ flex: 2 }}>
-                  <FLabel label="Item" c={c} />
-                  <TextInput
-                    style={[st.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
-                    value={cartItemName} onChangeText={setCartItemName}
-                    placeholder="e.g. Chicken breast" placeholderTextColor={c.textMuted}
-                    returnKeyType="next"
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <FLabel label="Price ($)" c={c} />
-                  <TextInput
-                    style={[st.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.green, fontFamily: MONO }]}
-                    value={cartItemPrice} onChangeText={setCartItemPrice}
-                    placeholder="0.00" placeholderTextColor={c.textMuted}
-                    keyboardType="decimal-pad" returnKeyType="done" onSubmitEditing={addCartItem}
-                  />
-                </View>
-                <TouchableOpacity
-                  style={[st.addItemBtn, { backgroundColor: c.blueGlow, borderColor: c.blue }]}
-                  onPress={addCartItem}>
-                  <Text style={{ color: c.blue, fontSize: 18, fontWeight: '700' }}>+</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Item list */}
-              {cartItems.length === 0 ? (
-                <View style={[st.emptyBox, { borderColor: c.borderSubtle, marginTop: 8 }]}>
-                  <Text style={[st.emptyTxt, { color: c.textMuted, fontFamily: MONO }]}>
-                    Your cart is empty. Add items above.
-                  </Text>
-                </View>
-              ) : (
-                <>
-                  {cartItems.map(item => (
-                    <View key={item.id} style={[st.cartRow, { borderBottomColor: c.borderSubtle }]}>
-                      <Text style={[st.cartItemName, { color: c.textPrimary, fontFamily: MONO }]} numberOfLines={1}>
-                        {item.name}
-                      </Text>
-                      {editingItemId === item.id ? (
-                        <TextInput
-                          style={[st.cartPriceInput, { borderColor: c.blue, backgroundColor: c.bgBase, color: c.green, fontFamily: MONO }]}
-                          value={editingPrice}
-                          onChangeText={setEditingPrice}
-                          onBlur={commitPriceEdit}
-                          onSubmitEditing={commitPriceEdit}
-                          keyboardType="decimal-pad"
-                          autoFocus
-                        />
-                      ) : (
-                        <TouchableOpacity onPress={() => { setEditingItemId(item.id); setEditingPrice(String(item.price)); }}>
-                          <Text style={[st.cartPrice, { color: c.green, fontFamily: MONO }]}>{fmt$(item.price)}</Text>
-                        </TouchableOpacity>
-                      )}
-                      <TouchableOpacity onPress={() => removeCartItem(item.id)} style={{ padding: 6 }}>
-                        <Text style={{ color: c.textMuted, fontSize: 14 }}>✕</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-
-                  {/* Running total */}
-                  <View style={[st.cartTotalRow, { borderTopColor: c.borderSubtle }]}>
-                    <Text style={[st.cartTotalLabel, { color: c.textMuted, fontFamily: MONO }]}>TOTAL</Text>
-                    <Text style={[st.cartTotalVal, { color: c.green, fontFamily: MONO }]}>{fmt$(cartTotal)}</Text>
-                  </View>
-                </>
-              )}
-
-              {/* Save cart */}
-              <View style={[st.formRow, { alignItems: 'flex-end', marginTop: 4 }]}>
-                <View style={{ flex: 1 }}>
-                  <FLabel label="Cart Name" c={c} />
-                  <TextInput
-                    style={[st.input, { borderColor: c.borderSubtle, backgroundColor: c.bgBase, color: c.textPrimary, fontFamily: MONO }]}
-                    value={cartName} onChangeText={setCartName}
-                    placeholder="e.g. Weekly Haul, Costco Run..." placeholderTextColor={c.textMuted}
-                  />
-                </View>
-                <TouchableOpacity
-                  style={[st.actionBtn, { backgroundColor: c.blueGlow, borderColor: c.blue, marginTop: 0 }]}
-                  onPress={saveCart}>
-                  <Text style={[st.actionBtnTxt, { color: c.blue, fontFamily: MONO }]}>Save Cart</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Saved carts list */}
-            <Text style={[st.secLabel, { color: c.textMuted, borderBottomColor: c.borderSubtle, fontFamily: MONO }]}>
-              SAVED CARTS ({savedCarts.length})
-            </Text>
-
-            {savedCarts.length === 0 ? (
-              <View style={[st.emptyBox, { borderColor: c.borderSubtle }]}>
-                <Text style={[st.emptyTxt, { color: c.textMuted, fontFamily: MONO }]}>
-                  No saved carts yet. Build a cart above and save it.
-                </Text>
-              </View>
-            ) : (
-              savedCarts.map(cart => (
-                <View key={cart.id} style={[st.card, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
-                  <TouchableOpacity
-                    onPress={() => setExpandedCartId(expandedCartId === cart.id ? null : cart.id)}
-                    style={st.cartCardHeader}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[st.cartCardName, { color: c.textPrimary, fontFamily: MONO }]}>{cart.name}</Text>
-                      <Text style={[st.cartCardMeta, { color: c.textMuted, fontFamily: MONO }]}>
-                        {cart.items.length} item{cart.items.length !== 1 ? 's' : ''} · {fmt$(cart.total)}
-                      </Text>
-                    </View>
-                    <Text style={{ color: c.textMuted, fontSize: 16 }}>
-                      {expandedCartId === cart.id ? '▴' : '▾'}
-                    </Text>
-                  </TouchableOpacity>
-
-                  {expandedCartId === cart.id && (
-                    <>
-                      {cart.items.map((item, i) => (
-                        <View key={i} style={[st.savedCartItem, { borderBottomColor: c.borderSubtle }]}>
-                          <Text style={[{ flex: 1, fontSize: 12, color: c.textPrimary, fontFamily: MONO }]} numberOfLines={1}>
-                            {item.name}
-                          </Text>
-                          <Text style={[{ fontSize: 12, fontWeight: '600', color: c.green, fontFamily: MONO }]}>
-                            {fmt$(item.price)}
-                          </Text>
-                        </View>
-                      ))}
-                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
-                        <TouchableOpacity
-                          onPress={() => loadCart(cart)}
-                          style={[st.cartActionBtn, { borderColor: c.blue, backgroundColor: c.blueGlow }]}>
-                          <Text style={[{ color: c.blue, fontSize: 11, fontWeight: '700', fontFamily: MONO }]}>LOAD INTO CART</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={() => deleteCart(cart.id)}
-                          style={[st.cartActionBtn, { borderColor: c.red, backgroundColor: 'transparent' }]}>
-                          <Text style={[{ color: c.red, fontSize: 11, fontWeight: '700', fontFamily: MONO }]}>DELETE</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </>
-                  )}
-                </View>
-              ))
-            )}
-          </>
+          <MealPlannerCartTab
+            user={user}
+            c={c}
+            onLogToInventory={logCartToInventory}
+            onSaved={() => { setSaved(true); setTimeout(() => setSaved(false), 1400); }}
+          />
         )}
 
         {/* ══════════════════════════════════════════════════════════════ */}
@@ -1415,20 +1208,6 @@ const st = StyleSheet.create({
   mealPillTxt:{ fontSize: 9, fontWeight: '700', letterSpacing: 0.4 },
   mealDate:   { fontSize: 10 },
 
-  // Cart calculator
-  addItemBtn:    { borderWidth: 1.5, borderRadius: 8, width: 38, height: 34, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
-  cartRow:       { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, borderBottomWidth: 1 },
-  cartItemName:  { flex: 1, fontSize: 12, fontWeight: '600' },
-  cartPrice:     { fontSize: 13, fontWeight: '700', minWidth: 56, textAlign: 'right' },
-  cartPriceInput:{ width: 72, borderWidth: 1, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 4, fontSize: 12, textAlign: 'right' },
-  cartTotalRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 10, marginTop: 6, borderTopWidth: 1 },
-  cartTotalLabel:{ fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
-  cartTotalVal:  { fontSize: 24, fontWeight: '700', letterSpacing: -0.5 },
-  cartCardHeader:{ flexDirection: 'row', alignItems: 'center', gap: 8 },
-  cartCardName:  { fontSize: 13, fontWeight: '700', marginBottom: 2 },
-  cartCardMeta:  { fontSize: 10 },
-  savedCartItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, gap: 8 },
-  cartActionBtn: { flex: 1, borderWidth: 1, borderRadius: 20, paddingVertical: 7, alignItems: 'center' },
 
   // Stats
   savingsBanner: { borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 10 },
