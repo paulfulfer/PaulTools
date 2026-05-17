@@ -1,8 +1,8 @@
+import { Platform } from 'react-native';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
 import 'firebase/compat/storage';
-import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyDAWxRGQoHZDmL2EeukPCfLKPO22pWuVbc',
@@ -17,9 +17,12 @@ if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
 }
 
-GoogleSignin.configure({
-  webClientId: '287433829882-at0bb6kqq7b67o4vfq42hee48r5ff943.apps.googleusercontent.com',
-});
+if (Platform.OS !== 'web') {
+  const { GoogleSignin } = require('@react-native-google-signin/google-signin');
+  GoogleSignin.configure({
+    webClientId: '287433829882-at0bb6kqq7b67o4vfq42hee48r5ff943.apps.googleusercontent.com',
+  });
+}
 
 export const auth    = firebase.auth();
 export const db      = firebase.firestore();

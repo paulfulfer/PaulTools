@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import { Platform } from 'react-native';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import { auth } from '../config/firebase';
@@ -15,17 +15,26 @@ export function AuthProvider({ children }) {
   }, []);
 
   const signInWithGoogle = async () => {
-    await GoogleSignin.hasPlayServices();
-    const response = await GoogleSignin.signIn();
-    if (response.type === 'success') {
-      const { idToken } = response.data;
-      const credential = firebase.auth.GoogleAuthProvider.credential(idToken);
-      await auth.signInWithCredential(credential);
+    if (Platform.OS === 'web') {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      await auth.signInWithPopup(provider);
+    } else {
+      const { GoogleSignin } = require('@react-native-google-signin/google-signin');
+      await GoogleSignin.hasPlayServices();
+      const response = await GoogleSignin.signIn();
+      if (response.type === 'success') {
+        const { idToken } = response.data;
+        const credential = firebase.auth.GoogleAuthProvider.credential(idToken);
+        await auth.signInWithCredential(credential);
+      }
     }
   };
 
   const logout = async () => {
-    await GoogleSignin.signOut();
+    if (Platform.OS !== 'web') {
+      const { GoogleSignin } = require('@react-native-google-signin/google-signin');
+      await GoogleSignin.signOut();
+    }
     await auth.signOut();
   };
 
