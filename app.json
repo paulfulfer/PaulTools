@@ -30,6 +30,12 @@
       "expo-web-browser",
       "expo-notifications",
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Paul's Tools to use your camera to scan barcodes."
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "photosPermission": "Allow Paul's Tools to access your photo library for course photos.",

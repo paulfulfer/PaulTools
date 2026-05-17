@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TextInput, TouchableOpacity,
   StyleSheet, Alert, Platform, ActivityIndicator,
-  Animated, LayoutAnimation, UIManager,
+  Animated, LayoutAnimation, UIManager, Modal, Image, ToastAndroid,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useTheme } from '../../context/ThemeContext';
@@ -110,6 +111,13 @@ export default function MealCostTrackerScreen() {
   const [editingPrice,   setEditingPrice]   = useState('');
   const [cartLocalId,    setCartLocalId]    = useState(1);
 
+  // ── Barcode scanner (Android only) ───────────────────────────────────────────
+  const [scannerOpen,  setScannerOpen]  = useState(false);
+  const [scannedImage, setScannedImage] = useState(null);
+  const [scanning,     setScanning]     = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const scannedOnce = useRef(false);
+
   // ── Refs (stale-closure guard for async handlers) ───────────────────────────
   const invRef      = useRef(inventory);
   const mealsRef    = useRef(meals);
@@ -213,6 +221,46 @@ export default function MealCostTrackerScreen() {
     }).start();
   };
 
+  // ── Barcode scanner handlers (Android only) ──────────────────────────────────
+
+  const openScanner = async () => {
+    if (!cameraPermission?.granted) {
+      const result = await requestCameraPermission();
+      if (!result.granted) {
+        Alert.alert(
+          'Camera permission required',
+          'Enable camera access in Settings → Apps → Paul\'s Tools → Permissions.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+    }
+    scannedOnce.current = false;
+    setScannerOpen(true);
+  };
+
+  const handleBarcodeScanned = async ({ data }) => {
+    if (scannedOnce.current) return;
+    scannedOnce.current = true;
+    setScannerOpen(false);
+    setScanning(true);
+    try {
+      const res  = await fetch(`https://world.openfoodfacts.org/api/v0/product/${data}.json`);
+      const json = await res.json();
+      if (json.status === 1 && json.product) {
+        const p = json.product;
+        if (p.product_name) setFName(p.product_name);
+        if (p.image_url)    setScannedImage(p.image_url);
+      } else {
+        ToastAndroid.show('Product not found — fill in details manually', ToastAndroid.LONG);
+      }
+    } catch {
+      ToastAndroid.show('Network error — fill in details manually', ToastAndroid.LONG);
+    } finally {
+      setScanning(false);
+    }
+  };
+
   const addPurchase = async () => {
     triggerHaptic();
     const cost  = parseFloat(fCost);
@@ -232,6 +280,7 @@ export default function MealCostTrackerScreen() {
     setInventory(newInv);
     setIdC(newId);
     setFName(''); setFCost(''); setFUnits(''); setFUnitName(''); setFNotes('');
+    setScannedImage(null);
     try { await writeAll(newInv, mealsRef.current, newId); }
     catch (err) { Alert.alert('Save error', err.message); }
   };
@@ -606,6 +655,48 @@ export default function MealCostTrackerScreen() {
         </View>
       )}
 
+      {/* ── Barcode scanner (Android only) ─────────────────────────── */}
+      {Platform.OS === 'android' && (
+        <Modal
+          visible={scannerOpen}
+          animationType="slide"
+          onRequestClose={() => setScannerOpen(false)}
+        >
+          <View style={{ flex: 1, backgroundColor: '#000' }}>
+            <CameraView
+              style={StyleSheet.absoluteFill}
+              facing="back"
+              onBarcodeScanned={handleBarcodeScanned}
+              barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'code128', 'code39', 'qr'] }}
+            />
+
+            {/* Darkened vignette with clear scanning window */}
+            <View style={StyleSheet.absoluteFill} pointerEvents="none">
+              <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} />
+              <View style={{ flexDirection: 'row', height: 200 }}>
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} />
+                <View style={st.reticleBox} />
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} />
+              </View>
+              <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }}>
+                <Text style={st.scannerHint}>Align barcode within the frame</Text>
+              </View>
+            </View>
+
+            {/* Cancel + Scan Again buttons */}
+            <View style={st.scannerControls}>
+              <TouchableOpacity style={st.scannerBtn} onPress={() => setScannerOpen(false)}>
+                <Text style={st.scannerBtnTxt}>✕  Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[st.scannerBtn, { backgroundColor: 'rgba(255,255,255,0.15)' }]}
+                onPress={() => { scannedOnce.current = false; }}>
+                <Text style={st.scannerBtnTxt}>↺  Scan Again</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      )}
+
       <ScrollView contentContainerStyle={st.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
         {/* ── Metrics ──────────────────────────────────────────────────── */}
@@ -645,6 +736,26 @@ export default function MealCostTrackerScreen() {
           <>
             <View style={[st.card, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}>
               <Text style={[st.cardTitle, { color: c.textMuted, fontFamily: MONO }]}>ADD GROCERY / TAKEOUT PURCHASE</Text>
+
+              {Platform.OS === 'android' && (
+                <View style={{ marginBottom: 4 }}>
+                  <TouchableOpacity
+                    style={[st.scanBtn, { borderColor: c.blue, backgroundColor: c.blueGlow }]}
+                    onPress={openScanner}
+                    disabled={scanning}
+                  >
+                    {scanning
+                      ? <ActivityIndicator color={c.blue} size="small" />
+                      : <Text style={{ color: c.blue, fontSize: 11, fontWeight: '700', fontFamily: MONO, letterSpacing: 0.5 }}>
+                          📷  SCAN BARCODE
+                        </Text>
+                    }
+                  </TouchableOpacity>
+                  {scannedImage && (
+                    <Image source={{ uri: scannedImage }} style={st.scannedImg} resizeMode="contain" />
+                  )}
+                </View>
+              )}
 
               <View style={st.formRow}>
                 <View style={{ flex: 1 }}>
@@ -1340,6 +1451,15 @@ const st = StyleSheet.create({
 
   emptyBox: { borderWidth: 1, borderStyle: 'dashed', borderRadius: 8, padding: 24, alignItems: 'center', marginBottom: 8 },
   emptyTxt: { fontSize: 12 },
+
+  // Barcode scanner
+  scanBtn:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderRadius: 8, paddingVertical: 8, marginBottom: 8 },
+  scannedImg:     { width: '100%', height: 100, borderRadius: 8, marginBottom: 6, backgroundColor: '#111' },
+  reticleBox:     { width: 260, borderWidth: 2, borderColor: '#fff', borderRadius: 6 },
+  scannerHint:    { textAlign: 'center', color: 'rgba(255,255,255,0.8)', fontSize: 13, fontWeight: '600', marginTop: 14 },
+  scannerControls:{ position: 'absolute', bottom: 40, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 16 },
+  scannerBtn:     { borderRadius: 24, paddingVertical: 11, paddingHorizontal: 28, backgroundColor: 'rgba(0,0,0,0.5)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
+  scannerBtnTxt:  { color: '#fff', fontSize: 14, fontWeight: '600' },
 
   // Archive
   archCard: { borderWidth: 1, borderRadius: 10, padding: 11, marginBottom: 6, opacity: 0.75 },
