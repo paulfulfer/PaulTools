@@ -108,7 +108,8 @@ export default function MealCostTrackerScreen() {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const scannedOnce = useRef(false);
 
-  // ── Refs (stale-closure guard for async handlers) ───────────────────────────
+  // ── Refs ────────────────────────────────────────────────────────────────────
+  const scrollRef   = useRef(null);
   const invRef      = useRef(inventory);
   const mealsRef    = useRef(meals);
   const idCRef      = useRef(idC);
@@ -634,7 +635,7 @@ export default function MealCostTrackerScreen() {
         </Modal>
       )}
 
-      <ScrollView contentContainerStyle={st.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scrollRef} contentContainerStyle={st.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
         {/* ── Metrics ──────────────────────────────────────────────────── */}
         <View style={st.metRow}>
@@ -1116,6 +1117,7 @@ export default function MealCostTrackerScreen() {
             c={c}
             onLogToInventory={logCartToInventory}
             onSaved={() => { setSaved(true); setTimeout(() => setSaved(false), 1400); }}
+            onScrollToTop={() => scrollRef.current?.scrollTo({ y: 0, animated: true })}
           />
         )}
 

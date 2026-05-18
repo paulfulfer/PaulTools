@@ -24,7 +24,7 @@ function mealCostPerServing(meal, ings) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function MealPlannerCartTab({ user, c, onLogToInventory, onSaved }) {
+export default function MealPlannerCartTab({ user, c, onLogToInventory, onSaved, onScrollToTop }) {
   // ── Local cart state ───────────────────────────────────────────────────────
   const [ingredients,   setIngredients]   = useState([]); // CartIngredient[]
   const [meals,         setMeals]         = useState([]); // Meal[]
@@ -229,16 +229,56 @@ export default function MealPlannerCartTab({ user, c, onLogToInventory, onSaved 
   };
 
   const loadCart = (cart) => {
-    Alert.alert('Load Cart', 'Replace current cart with this saved cart?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Load', onPress: () => {
-        setIngredients(cart.ingredients || []);
-        setMeals(cart.meals || []);
-        setCartName(cart.name || '');
-        setIngPickerMealId(null);
-        setEditingIngId(null);
-      }},
-    ]);
+    Alert.alert(
+      `Load "${cart.name}"?`,
+      'This will replace your current cart.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Load',
+          onPress: () => {
+            // Normalize ingredients: Firestore may return numbers or nulls for
+            // fields that were originally saved as empty strings. Force all
+            // TextInput-bound values to strings so controlled inputs stay stable.
+            const safeIngs = (cart.ingredients || []).map(x => ({
+              id:            String(x.id ?? nid()),
+              name:          x.name ?? '',
+              purchasePrice: x.purchasePrice != null ? String(x.purchasePrice) : '',
+              purchaseYield: x.purchaseYield != null ? String(x.purchaseYield) : '',
+              unitLabel:     x.unitLabel ?? 'serving',
+            }));
+
+            const safeMeals = (cart.meals || []).map(m => ({
+              id:              String(m.id ?? nid()),
+              name:            m.name ?? '',
+              servingsPlanned: m.servingsPlanned != null ? String(m.servingsPlanned) : '1',
+              ingredients:     (m.ingredients || []).map(mi => ({
+                ingredientId: String(mi.ingredientId ?? ''),
+                unitsPerMeal: mi.unitsPerMeal != null ? String(mi.unitsPerMeal) : '1',
+              })),
+            }));
+
+            // Advance idCounter past all loaded IDs so new items never get
+            // a duplicate key, which silently corrupts React's list diffing.
+            const maxId = Math.max(
+              0,
+              ...safeIngs.map(x => parseInt(x.id, 10) || 0),
+              ...safeMeals.map(m => parseInt(m.id, 10) || 0),
+            );
+            if (maxId >= idCounter.current) idCounter.current = maxId + 1;
+
+            setIngredients(safeIngs);
+            setMeals(safeMeals);
+            setCartName(cart.name ?? '');
+            setIngPickerMealId(null);
+            setEditingIngId(null);
+
+            // Scroll to top so the user sees the newly populated cart
+            onScrollToTop?.();
+          },
+        },
+      ]
+    );
   };
 
   const deleteCart = (cartId) => {
