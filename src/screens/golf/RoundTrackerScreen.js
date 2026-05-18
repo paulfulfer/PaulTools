@@ -168,6 +168,29 @@ const p3 = StyleSheet.create({
   num2: { width:40, fontSize:11, borderWidth:1, borderRadius:5, paddingHorizontal:5, paddingVertical:4, textAlign:'center' },
 });
 
+// ─── Detail error boundary ───────────────────────────────────────────────────
+// Catches render errors in the round detail view so a data issue shows a
+// friendly message instead of a white screen.
+
+class DetailErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  render() {
+    if (!this.state.err) return this.props.children;
+    const { c } = this.props;
+    return (
+      <View style={{ padding:28, alignItems:'center', gap:8 }}>
+        <Text style={{ color:c.red, fontSize:14, fontWeight:'600', fontFamily:MONO, textAlign:'center' }}>
+          Could not display this round.
+        </Text>
+        <Text style={{ color:c.textMuted, fontSize:11, fontFamily:MONO, textAlign:'center' }}>
+          {this.state.err.message || 'Unknown error'}
+        </Text>
+      </View>
+    );
+  }
+}
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 const EMPTY_FORM = {
@@ -286,8 +309,11 @@ export default function RoundTrackerScreen({ navigation }) {
     const allP3s = rounds.flatMap(r=>r.par3s||[]);
     const p3Scores = allP3s.filter(p=>p.score>0);
     const p3ScoreAvg = p3Scores.length ? p3Scores.reduce((s,p)=>s+p.score,0)/p3Scores.length : null;
-    const p3GirN = allP3s.filter(p=>p.gir!=null);
-    const p3GirPct = p3GirN.length ? allP3s.filter(p=>p.gir===true).length/p3GirN.length*100 : null;
+    // Denominator is ALL par 3 holes played (not just explicitly-tracked ones).
+    // Using only gir!=null holes caused 100% when tracked holes were all true.
+    const p3GirPct = allP3s.length > 0
+      ? allP3s.filter(p => p.gir === true).length / allP3s.length * 100
+      : null;
     const clubs = {}; allP3s.filter(p=>p.club).forEach(p=>{ clubs[p.club]=(clubs[p.club]||0)+1; });
     const topClub = Object.entries(clubs).sort((a,b)=>b[1]-a[1])[0]?.[0] || null;
     const p3Great = allP3s.filter(p=>p.score>0&&p.score<=2).length;
@@ -636,10 +662,11 @@ export default function RoundTrackerScreen({ navigation }) {
 
                 {/* ── DETAIL MODE ── */}
                 {modalMode === 'detail' && detailRound && (
+                  <DetailErrorBoundary c={c}>
                   <>
                     {/* Score hero */}
                     <View style={s.detailHero}>
-                      <View style={[rb.badge, { width:56, height:56, backgroundColor:scoreColorBg(detailRound.score,detailRound.par,c), borderColor:scoreCol(detailRound.score,detailRound.par,c) }]}>
+                      <View style={[rb.badge, { width:56, height:56, backgroundColor:scoreColBg(detailRound.score,detailRound.par,c), borderColor:scoreCol(detailRound.score,detailRound.par,c) }]}>
                         <Text style={[rb.badgeTxt, { color:scoreCol(detailRound.score,detailRound.par,c), fontFamily:MONO, fontSize:20 }]}>{detailRound.score}</Text>
                       </View>
                       <View>
@@ -700,6 +727,7 @@ export default function RoundTrackerScreen({ navigation }) {
                       </TouchableOpacity>
                     </View>
                   </>
+                  </DetailErrorBoundary>
                 )}
 
               </ScrollView>
