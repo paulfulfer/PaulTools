@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  Alert, Modal, ScrollView, ActivityIndicator,
+  Alert, Modal, ScrollView, ActivityIndicator, Platform,
 } from 'react-native';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
@@ -46,10 +46,11 @@ export default function MealPlannerCartTab({ user, c, onLogToInventory, onSaved 
   const [logExtraItems,       setLogExtraItems]        = useState([]);
   const [saving,              setSaving]               = useState(false);
 
-  const idCounter  = useRef(1);
-  const ingsRef    = useRef(ingredients);
-  const mealsRef   = useRef(meals);
-  const userRef    = useRef(user);
+  const idCounter    = useRef(1);
+  const ingsRef      = useRef(ingredients);
+  const mealsRef     = useRef(meals);
+  const userRef      = useRef(user);
+  const shopItemRefs = useRef({}); // web: keyed by ing.id → DOM node for activeElement guard
   useEffect(() => { ingsRef.current  = ingredients; }, [ingredients]);
   useEffect(() => { mealsRef.current = meals;        }, [meals]);
   useEffect(() => { userRef.current  = user;         }, [user]);
@@ -79,8 +80,12 @@ export default function MealPlannerCartTab({ user, c, onLogToInventory, onSaved 
     return id;
   };
 
-  const updateIng = (id, field, value) =>
-    setIngredients(prev => prev.map(x => x.id !== id ? x : { ...x, [field]: value }));
+  // useCallback so the function reference is stable — prevents the shopping list
+  // from re-rendering the parent on every keystroke, which on web was causing
+  // spurious blur/press events that collapsed the expanded row.
+  const updateIng = useCallback((id, field, value) =>
+    setIngredients(prev => prev.map(x => x.id !== id ? x : { ...x, [field]: value }))
+  , []);
 
   const removeIng = (id) => {
     setIngredients(prev => prev.filter(x => x.id !== id));
@@ -456,30 +461,46 @@ export default function MealPlannerCartTab({ user, c, onLogToInventory, onSaved 
         ingredients.map(ing => {
           const ingCpu   = cpu(ing);
           const expanded = editingIngId === ing.id;
+
+          // On web, only collapse if focus has genuinely left the container.
+          // Typing in a field causes re-renders that on web can trigger onPress
+          // on a TouchableOpacity parent — this guard prevents that.
+          const handleHeaderPress = () => {
+            if (Platform.OS === 'web' && expanded) {
+              const el = shopItemRefs.current[ing.id];
+              if (el?.contains?.(document.activeElement)) return;
+            }
+            setEditingIngId(expanded ? null : ing.id);
+          };
+
           return (
-            <TouchableOpacity
+            // Outer wrapper is a plain View — NOT TouchableOpacity.
+            // Only the summary header row is tappable. This prevents typing
+            // in the edit fields from bubbling a press event that closes the row.
+            <View
               key={ing.id}
-              activeOpacity={0.85}
-              onPress={() => setEditingIngId(expanded ? null : ing.id)}
+              ref={el => { shopItemRefs.current[ing.id] = el; }}
               style={[s.shopItem, { backgroundColor: c.bgCard, borderColor: c.borderSubtle }]}
             >
-              {/* Collapsed row */}
-              <View style={s.shopItemHeader}>
-                <Text style={[s.shopName, { color: ing.name ? c.textPrimary : c.textMuted }]} numberOfLines={1}>
-                  {ing.name || 'Tap to edit'}
-                </Text>
-                {ingCpu > 0 && (
-                  <Text style={[s.shopCpu, { color: c.textMuted }]}>{fmt$(ingCpu)}/{ing.unitLabel || 'unit'}</Text>
-                )}
-                <Text style={[s.shopPrice, { color: parseFloat(ing.purchasePrice) > 0 ? c.amber : c.textMuted }]}>
-                  {parseFloat(ing.purchasePrice) > 0 ? fmt$(ing.purchasePrice) : '—'}
-                </Text>
-                <TouchableOpacity onPress={() => removeIng(ing.id)} style={{ padding: 4 }}>
-                  <Text style={{ color: c.textMuted, fontSize: 14 }}>✕</Text>
-                </TouchableOpacity>
-              </View>
+              {/* Tappable summary header */}
+              <TouchableOpacity activeOpacity={0.75} onPress={handleHeaderPress}>
+                <View style={s.shopItemHeader}>
+                  <Text style={[s.shopName, { color: ing.name ? c.textPrimary : c.textMuted }]} numberOfLines={1}>
+                    {ing.name || 'Tap to edit'}
+                  </Text>
+                  {ingCpu > 0 && (
+                    <Text style={[s.shopCpu, { color: c.textMuted }]}>{fmt$(ingCpu)}/{ing.unitLabel || 'unit'}</Text>
+                  )}
+                  <Text style={[s.shopPrice, { color: parseFloat(ing.purchasePrice) > 0 ? c.amber : c.textMuted }]}>
+                    {parseFloat(ing.purchasePrice) > 0 ? fmt$(ing.purchasePrice) : '—'}
+                  </Text>
+                  <TouchableOpacity onPress={() => removeIng(ing.id)} style={{ padding: 4 }}>
+                    <Text style={{ color: c.textMuted, fontSize: 14 }}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
 
-              {/* Expanded edit fields */}
+              {/* Edit fields live outside the TouchableOpacity — no event bubbling */}
               {expanded && (
                 <View style={s.shopEditGrid}>
                   <View style={{ flex: 2 }}>
@@ -526,7 +547,7 @@ export default function MealPlannerCartTab({ user, c, onLogToInventory, onSaved 
                   </View>
                 </View>
               )}
-            </TouchableOpacity>
+            </View>
           );
         })
       )}
